@@ -19,6 +19,7 @@ import { useNodeCardModel } from "@/hooks/useNodeCardModel";
 import { usePreferences } from "@/hooks/usePreferences";
 import { useMetricColorsVersion } from "@/hooks/useMetricColors";
 import { useThemeSettings } from "@/hooks/useThemeSettings";
+import { useNodeBackRoute } from "@/hooks/useBackRoutes";
 import { formatBytes } from "@/utils/format";
 import { HOMEPAGE_MULTI_PING_TASK_COUNT } from "@/utils/pingTasks";
 import {
@@ -66,6 +67,7 @@ export const NodeCard = memo(function NodeCard({
   const colorsVersion = useMetricColorsVersion();
   const redrawKey = `${resolvedAppearance}:${colorsVersion}`;
   const themeSettings = useThemeSettings();
+  const backRoute = useNodeBackRoute(uuid);
   const model = useNodeCardModel(uuid, { includeMultiPing: true });
 
   if (!model.node) {
@@ -164,6 +166,7 @@ export const NodeCard = memo(function NodeCard({
             <MultiPingStatus
               lines={homepagePingLines}
               density="large"
+              backRoute={backRoute}
               className="card-metric-section"
             />
           ) : (

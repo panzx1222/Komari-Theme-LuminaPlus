@@ -466,6 +466,30 @@ function json(data: unknown, init?: ResponseInit) {
   });
 }
 
+const mockRouteTasks = new Map<string, { clients: string[]; startedAt: number }>();
+
+function mockRouteOutput(index: number) {
+  const line = (ttl: number, ip: string, asn: string) => `${ttl}|${ip}|h|1.0|${asn}|||||Org|0|0`;
+  const sections =
+    index % 2 === 0
+      ? {
+          ct: [line(1, "10.0.0.1", ""), line(2, "38.1.1.1", "979"), line(3, "59.43.1.1", "4809"), line(4, "59.43.2.1", "4809")],
+          cu: [line(1, "10.0.0.1", ""), line(2, "218.105.1.1", "9929"), line(3, "218.105.2.1", "9929")],
+          cm: [line(1, "10.0.0.1", ""), line(2, "223.119.8.1", "58807"), line(3, "221.183.1.1", "9808")],
+        }
+      : {
+          ct: [line(1, "10.0.0.1", ""), line(2, "103.1.1.1", "17676"), line(3, "202.97.1.1", "4134"), line(4, "202.97.2.1", "4134")],
+          cu: [line(1, "10.0.0.1", ""), line(2, "210.1.1.1", "2497"), line(3, "219.158.1.1", "4837"), line(4, "219.158.2.1", "4837")],
+          cm: [line(1, "10.0.0.1", ""), line(2, "4.68.1.1", "3356"), line(3, "223.120.1.1", "58453")],
+        };
+  return [
+    "__LP_ROUTE_TOOL_nexttrace__",
+    "__LP_ROUTE_SECTION_ct__", ...sections.ct,
+    "__LP_ROUTE_SECTION_cu__", ...sections.cu,
+    "__LP_ROUTE_SECTION_cm__", ...sections.cm,
+  ].join("\n");
+}
+
 export function installDevMockApi() {
   const nativeFetch = window.fetch.bind(window);
   // ?mock=1&admin=1 模拟已登录管理员,连带放开 /api/admin/*,ThemeManage 才可在 dev 调试。
@@ -524,6 +548,33 @@ export function installDevMockApi() {
       return json({ status: "success" });
     }
 
+    // 三网回程：模拟 admin:exec 下发与结果轮询，约 6 秒后返回 nexttrace --raw 输出。
+    if (url.pathname === "/api/admin/task/exec" && request.method === "POST") {
+      if (!adminMode) return json({ message: "unauthorized" }, { status: 401 });
+      const { clients } = (await request.json()) as { clients: string[] };
+      const taskId = `mock-task-${Date.now()}`;
+      mockRouteTasks.set(taskId, { clients, startedAt: Date.now() });
+      return json({ status: "success", data: { task_id: taskId, clients, queued_clients: [] } });
+    }
+
+    const routeTaskMatch = /^\/api\/admin\/task\/([^/]+)\/result$/.exec(url.pathname);
+    if (routeTaskMatch) {
+      if (!adminMode) return json({ message: "unauthorized" }, { status: 401 });
+      const task = mockRouteTasks.get(decodeURIComponent(routeTaskMatch[1]!));
+      if (!task) return json({ status: "error", message: "No results found for this task" }, { status: 404 });
+      const finished = Date.now() - task.startedAt > 6_000;
+      return json({
+        status: "success",
+        data: task.clients.map((client, index) => ({
+          task_id: "mock",
+          client,
+          result: finished ? mockRouteOutput(index) : "",
+          exit_code: finished ? 0 : null,
+          finished_at: finished ? new Date().toISOString() : null,
+        })),
+      });
+    }
+
     if (url.pathname === "/api/public") {
       const theme = url.searchParams.get("theme") ?? defaultTheme;
       return json({
@@ -564,6 +615,27 @@ export function installDevMockApi() {
           homepageMultiPingNodeTaskIds: {
             ...(nodes[0] ? { [nodes[0].uuid]: [3, 2, 1] } : {}),
             ...(nodes[1] ? { [nodes[1].uuid]: [1, 4, 3] } : {}),
+          },
+          backRoute: {
+            region: "gd",
+            results: {
+              "tokyo-edge-01": {
+                at: Math.floor(Date.now() / 1000) - 3600,
+                region: "gd",
+                tool: "nexttrace",
+                ct: { code: "ct_163", transit: 17676 },
+                cu: { code: "cu_4837", transit: 2497 },
+                cm: { code: "cm_cmi", transit: 3356 },
+              },
+              "hong-kong-cache-01": {
+                at: Math.floor(Date.now() / 1000) - 86400,
+                region: "gd",
+                tool: "nexttrace",
+                ct: { code: "ct_cn2_gia", transit: 979 },
+                cu: { code: "cu_9929", transit: null },
+                cm: { code: "cm_cmin2", transit: null },
+              },
+            },
           },
         },
       });

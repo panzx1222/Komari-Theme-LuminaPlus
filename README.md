@@ -171,6 +171,15 @@ chmod 644 /komari/data/theme/LuminaPlus/dist/assets/my-background.mp4
   <img src="docs/images/v1.1.7/settings-card-cost.png" alt="小卡片与资产统计配置" width="70%">
 </p>
 
+### 三网回程线路
+
+在主题管理「三网回程线路」中勾选节点并选择检测地区（广东 / 上海 / 北京），主题会通过 Komari 远程执行在节点上运行 [nexttrace](https://github.com/nxtrace/NTrace-core)，判定电信、联通、移动的回程骨干（CN2GIA、9929、CMIN2、163、4837、CMI 等），并显示在首页三网延迟的丢包列旁。进入国内骨干前经过 Softbank、IIJ、Level3、NTT 等常见中转商时显示为 `Softbank→163`，其余中转（如 AS979）省略。
+
+- 需要节点的 Komari Agent 开启远程控制；后台账号启用 2FA 时 Komari 会拒绝远程执行。
+- 节点没有 nexttrace 时会自动下载固定版本 v1.3.7；无法下载时回退到系统 `traceroute`（只判骨干，不判中转）。
+- 三网 Ping 任务名需包含「电信 / 联通 / 移动」，徽章才能对应到行。
+- 判定规则移植自 [komari-theme-transit](https://github.com/yyy622hhh/komari-theme-transit)（MIT），其规则来自 [oneclickvirt/backtrace](https://github.com/oneclickvirt/backtrace)。
+
 ### 离线状态
 
 离线节点保持清晰的状态提示，同时保留最近一次上报的关键指标。
@@ -182,6 +191,8 @@ chmod 644 /komari/data/theme/LuminaPlus/dist/assets/my-background.mp4
 ## 致谢
 
 特别感谢 [stqfdyr/komari-theme-Lumina](https://github.com/stqfdyr/komari-theme-Lumina)。
+
+特别感谢 [yyy622hhh/komari-theme-transit](https://github.com/yyy622hhh/komari-theme-transit) 提供三网回程线路的判定规则（MIT License）。
 
 特别感谢 [Montia37/komari-theme-purcarte](https://github.com/Montia37/komari-theme-purcarte) 提供视频背景的设计思路与内置测试视频素材。
 
