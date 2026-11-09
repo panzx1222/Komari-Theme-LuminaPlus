@@ -369,12 +369,31 @@ function findMainlandEntry(hops: readonly BackRouteHop[]): number {
   return hops.findIndex((hop) => hop.asn != null && CHINA_BACKBONE_ASNS.has(hop.asn));
 }
 
+/**
+ * 把经过 CN2（AS4809）的回程细分为 CTGGIA / CN2GT / CN2GIA：
+ * - 出现 CTGNet（AS23764）→ CTGGIA；
+ * - CN2 段结束后的下一跳是 163 骨干（202.97.*，NodeQuality 同款判据），或者 163 出现在
+ *   CN2 之前 → CN2GT（国际段走 CN2、国内段走 163）；
+ * - 否则 CN2 一直走到省网 → CN2GIA。
+ */
+function classifyCn2(hops: readonly BackRouteHop[], all: ReadonlySet<number>): string {
+  if (all.has(23764)) return "CTGGIA";
+  const cn2Index = hops.findIndex((hop) => hop.asn === 4809);
+  const ct163Index = hops.findIndex((hop) => hop.asn === 4134);
+  if (ct163Index >= 0 && ct163Index < cn2Index) return "CN2GT";
+  const after = hops.slice(cn2Index + 1).find((hop) => hop.asn !== 4809 && hop.asn !== 23764);
+  return after?.ip.startsWith("202.97.") ? "CN2GT" : "CN2GIA";
+}
+
 /** 第一跳认不出时，按整条路由里出现过的骨干 ASN 兜底，顺序与 NodeQuality 相同。 */
-function fallbackByAllAsns(all: ReadonlySet<number>): string | null {
+function fallbackByAllAsns(
+  hops: readonly BackRouteHop[],
+  all: ReadonlySet<number>,
+): string | null {
   if (all.has(58807)) return "CMIN2";
   if (all.has(9929)) return "9929";
   if (all.has(10099)) return "10099";
-  if (all.has(4809)) return "CN2";
+  if (all.has(4809)) return classifyCn2(hops, all);
   if (all.has(9808) || all.has(58453)) return "CMI";
   if (all.has(4134)) return "163";
   if (all.has(4837)) return "4837";
@@ -389,7 +408,7 @@ export function classifyBackRoute(_carrier: BackRouteCarrier, hops: readonly Bac
   const all = new Set(hops.map((hop) => hop.asn).filter((asn): asn is number => asn != null));
   let entry = findMainlandEntry(hops);
   // 进不了大陆，或大陆段只有最后一跳（目标本身），说明中间路由被隐藏。
-  if (entry < 0 || entry === hops.length - 1) return fallbackByAllAsns(all) ?? "Hidden";
+  if (entry < 0 || entry === hops.length - 1) return fallbackByAllAsns(hops, all) ?? "Hidden";
   // Softbank（AS17676）常出现在大陆边界跳上，NodeQuality 顺延一跳再看。
   if (hops[entry]!.asn === 17676 && entry + 1 < hops.length) entry += 1;
 
@@ -408,13 +427,8 @@ export function classifyBackRoute(_carrier: BackRouteCarrier, hops: readonly Bac
       return "9929";
     case 10099:
       return all.has(9929) ? "9929" : "10099";
-    case 4809: {
-      if (all.has(23764)) return "CTGGIA";
-      // 163 骨干出现在 CN2 之前，说明先走 163 再进 CN2，即 CN2GT。
-      const cn2Index = hops.findIndex((hop) => hop.asn === 4809);
-      const ct163Index = hops.findIndex((hop) => hop.asn === 4134);
-      return ct163Index >= 0 && ct163Index < cn2Index ? "CN2GT" : "CN2GIA";
-    }
+    case 4809:
+      return classifyCn2(hops, all);
     case 23764:
       return "CTGGIA";
     case 4538:
@@ -422,7 +436,7 @@ export function classifyBackRoute(_carrier: BackRouteCarrier, hops: readonly Bac
     case 7497:
       return "CSTNET";
     default:
-      return fallbackByAllAsns(all) ?? "NoData";
+      return fallbackByAllAsns(hops, all) ?? "NoData";
   }
 }
 

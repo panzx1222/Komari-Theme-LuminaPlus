@@ -245,3 +245,74 @@ describe("backRoute schedule", () => {
     expect(isMainlandChinaRegion("HK")).toBe(false);
   });
 });
+
+describe("backRoute CN2 refinement", () => {
+  const trace = (...lines: string[]) =>
+    ["__LP_ROUTE_TOOL_nexttrace__", "__LP_ROUTE_SECTION_ct__", ...lines].join("\n");
+  const codeOf = (output: string) => {
+    const outcome = buildBackRouteResult(output, "gd", 1);
+    return outcome.status === "ok" ? outcome.result.ct?.code : outcome.status;
+  };
+
+  it("reports CN2GIA when CN2 runs into the provincial network", () => {
+    expect(
+      codeOf(
+        trace(
+          nt(1, "10.0.0.1", ""),
+          nt(2, "59.43.1.1", "4809", "中国", "广东"),
+          nt(3, "59.43.2.1", "4809", "中国", "广东"),
+          nt(4, "14.18.1.1", "4134", "中国", "广东"),
+        ),
+      ),
+    ).toBe("CN2GIA");
+  });
+
+  it("reports CN2GT when the CN2 segment hands off to the 163 backbone", () => {
+    expect(
+      codeOf(
+        trace(
+          nt(1, "10.0.0.1", ""),
+          nt(2, "59.43.1.1", "4809", "中国", "广东"),
+          nt(3, "202.97.1.1", "4134", "中国", "广东"),
+          nt(4, "202.97.2.1", "4134", "中国", "广东"),
+        ),
+      ),
+    ).toBe("CN2GT");
+  });
+
+  it("refines CN2 in the fallback path too", () => {
+    // 第一跳是省网 ASN（认不出），但路由里经过了 CN2。
+    expect(
+      codeOf(
+        trace(
+          nt(1, "10.0.0.1", ""),
+          nt(2, "59.43.1.1", "4809", "中国", "香港"),
+          nt(3, "202.97.1.1", "4134", "中国", "香港"),
+          nt(4, "112.1.1.1", "17621", "中国", "广东"),
+          nt(5, "112.1.2.1", "17621", "中国", "广东"),
+        ),
+      ),
+    ).toBe("CN2GT");
+    expect(
+      codeOf(
+        trace(
+          nt(1, "10.0.0.1", ""),
+          nt(2, "59.43.1.1", "4809", "中国", "香港"),
+          nt(3, "112.1.1.1", "17621", "中国", "广东"),
+          nt(4, "112.1.2.1", "17621", "中国", "广东"),
+        ),
+      ),
+    ).toBe("CN2GIA");
+    expect(
+      codeOf(
+        trace(
+          nt(1, "10.0.0.1", ""),
+          nt(2, "69.194.1.1", "", "美国", "", "CTGNet"),
+          nt(3, "59.43.1.1", "4809", "中国", "香港"),
+          nt(4, "112.1.1.1", "17621", "中国", "广东"),
+          nt(5, "112.1.2.1", "17621", "中国", "广东"),
+        ),
+      ),
+    ).toBe("CTGGIA");
+  });
+});
