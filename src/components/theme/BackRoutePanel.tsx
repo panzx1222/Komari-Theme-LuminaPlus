@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
-import { Radar, Trash2 } from "lucide-react";
+import { FileText, Radar, Trash2 } from "lucide-react";
 import { Flag } from "@/components/ui/Flag";
 import { useBackRouteSettings } from "@/hooks/useBackRoutes";
 import {
@@ -79,6 +79,9 @@ export function BackRoutePanel({
   const [running, setRunning] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // 本次会话的原始回执，只存在内存里，用于排查「无数据 / 隐藏」。
+  const [outputs, setOutputs] = useState<Record<string, string>>({});
+  const [openOutput, setOpenOutput] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => () => abortRef.current?.abort(), []);
@@ -120,9 +123,10 @@ export function BackRoutePanel({
         taskId,
         uuids,
         region,
-        (uuid, outcome) => {
+        (uuid, outcome, output) => {
           if (outcome.status === "ok") okResults[uuid] = outcome.result;
           else failed += 1;
+          if (output) setOutputs((current) => ({ ...current, [uuid]: output }));
           setStatuses((current) => ({
             ...current,
             [uuid]:
@@ -238,10 +242,8 @@ export function BackRoutePanel({
           const status = statuses[client.uuid];
           const result = settings.results[client.uuid];
           return (
-            <div
-              key={client.uuid}
-              className="flex items-center justify-between gap-3 border-b border-[var(--hairline)] px-3 py-2 last:border-b-0"
-            >
+            <div key={client.uuid} className="border-b border-[var(--hairline)] px-3 py-2 last:border-b-0">
+            <div className="flex items-center justify-between gap-3">
               <label
                 className={clsx(
                   "flex min-w-0 shrink-0 items-center gap-2 sm:w-[34%]",
@@ -268,6 +270,20 @@ export function BackRoutePanel({
                 ) : (
                   <RouteCells result={result} />
                 )}
+                {outputs[client.uuid] && (
+                  <button
+                    type="button"
+                    className="shrink-0 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
+                    title="查看本次检测的原始输出"
+                    aria-label={`查看 ${client.name} 的原始输出`}
+                    aria-expanded={openOutput === client.uuid}
+                    onClick={() =>
+                      setOpenOutput((current) => (current === client.uuid ? null : client.uuid))
+                    }
+                  >
+                    <FileText size={13} />
+                  </button>
+                )}
                 {result && !running && (
                   <button
                     type="button"
@@ -280,6 +296,24 @@ export function BackRoutePanel({
                   </button>
                 )}
               </div>
+            </div>
+            {openOutput === client.uuid && outputs[client.uuid] && (
+              <div className="mt-2 flex flex-col gap-1">
+                <div className="flex items-center justify-between text-[11px] text-[var(--text-tertiary)]">
+                  <span>原始输出（仅本次会话保留，不会保存）</span>
+                  <button
+                    type="button"
+                    className="hover:text-[var(--text-primary)]"
+                    onClick={() => void navigator.clipboard?.writeText(outputs[client.uuid] ?? "")}
+                  >
+                    复制
+                  </button>
+                </div>
+                <pre className="max-h-[240px] overflow-auto rounded-[8px] bg-[color-mix(in_srgb,var(--text-primary)_5%,transparent)] p-2 text-[10.5px] leading-[1.45] text-[var(--text-secondary)]">
+                  {outputs[client.uuid]}
+                </pre>
+              </div>
+            )}
             </div>
           );
         })}

@@ -1,17 +1,18 @@
 /**
  * 三网回程线路：采集命令、输出解析、线路判定与展示格式。
  *
- * 判定规则移植自 yyy622hhh/komari-theme-transit 的 `src/utils/routeClassification.ts`
- * （MIT License, Copyright (c) 2026 yyy622hhh; Copyright (c) 2025 Tony Liu），
- * 其规则又来自 oneclickvirt/backtrace（NodeQuality 三网回程检测底层用的同一套）。
+ * 判定口径对齐 NodeQuality 的「三网回程路由」（xykt/NetQuality `nexttrace_test`）：
+ * 看回程进入中国大陆后第一跳的 ASN——AS4134 → 163、AS4809 → CN2GIA、AS4837 → 4837、
+ * AS9929 → 9929、AS58807 → CMIN2、AS58453/AS9808 → CMI 等；第一跳认不出时，再按整条
+ * 路由出现过的骨干 ASN 兜底。境外中转取进入大陆前最后一个境外 ASN，只有在白名单里
+ * （Softbank / IIJ / Level3 等）才显示为 `Softbank->163`，例如 AS979 → CN2GIA 只显示
+ * `CN2GIA`。
  *
- * 与 Transit 的差异：采集优先使用 nexttrace `--raw`，它逐跳给出 ASN，因此还能识别
- * 进入国内骨干前最后一个境外中转商（Softbank / IIJ / Level3 等），展示为
- * `Softbank->163`。只有中转商在白名单里才显示，例如 AS979 → CN2GIA 只显示 `CN2GIA`。
- * 节点没有 nexttrace 且无法下载时回退到系统 traceroute，此时只能判骨干、不判中转。
- *
- * 浏览器拿不到逐跳信息，traceroute 只能在节点上跑：主题通过 Komari 的
- * `admin:exec` 下发下面的固定命令，再把 stdout 拿回来解析。
+ * 采集流程参考 yyy622hhh/komari-theme-transit（MIT License, Copyright (c) 2026
+ * yyy622hhh; Copyright (c) 2025 Tony Liu）：浏览器拿不到逐跳信息，主题通过 Komari 的
+ * `admin:exec` 下发下面的固定命令，在节点上运行 nexttrace `--raw`，再把 stdout 拿回来
+ * 解析。节点没有 nexttrace 且无法下载时回退到系统 traceroute，此时只能按骨干 IP 段
+ * 判断、不判中转。
  */
 
 export type BackRouteCarrier = "ct" | "cu" | "cm";
@@ -159,12 +160,18 @@ function regionTargets(region: BackRouteRegion): Record<BackRouteCarrier, string
  * 绝不进命令字符串。
  *
  * 1. 没有 nexttrace 时，从 GitHub Release 下载固定版本 v1.3.7（与 NodeQuality 相同）。
- * 2. 三网并行追踪，nexttrace 被 API 限流时重试一次。
+ * 2. 三网错开 2 秒并行追踪。与 NodeQuality 相同：nexttrace 的 IP 归属 API 被限流时
+ *    输出里会有「try again later」，或者根本没跑出跳点，这两种情况等 5 秒重试，最多 5 次。
  * 3. 都没有时回退到 traceroute（ICMP 优先，失败再 UDP）。
  */
 export function buildBackRouteCommand(region: BackRouteRegion): string {
   const safeRegion: BackRouteRegion = isBackRouteRegion(region) ? region : DEFAULT_BACK_ROUTE_REGION;
   const targets = regionTargets(safeRegion);
+  const nexttraceJob = (carrier: BackRouteCarrier, delay: number) =>
+    `  ( sleep ${delay}; N=0; while [ "$N" -lt 5 ]; do ` +
+    `timeout 60 "$NT" -4 --tcp -p 80 -q 3 -m 30 --raw ${targets[carrier]} >"$D/${carrier}" 2>&1; ` +
+    `if grep -q '|' "$D/${carrier}" && ! grep -qi 'try again later' "$D/${carrier}"; then break; fi; ` +
+    `N=$((N+1)); sleep 5; done ) &`;
   const lines = [
     "NT=$(command -v nexttrace 2>/dev/null || true)",
     'if [ -z "$NT" ]; then',
@@ -181,11 +188,9 @@ export function buildBackRouteCommand(region: BackRouteRegion): string {
     "D=$(mktemp -d)",
     'if [ -n "$NT" ]; then',
     `  echo ${TOOL_MARKER_PREFIX}nexttrace__`,
-    ...BACK_ROUTE_CARRIERS.map(
-      (carrier) =>
-        `  ( timeout 90 "$NT" -4 --tcp -p 80 -q 3 -m 30 --raw ${targets[carrier]} >"$D/${carrier}" 2>&1; ` +
-        `grep -q '|' "$D/${carrier}" || { sleep 5; timeout 90 "$NT" -4 --tcp -p 80 -q 3 -m 30 --raw ${targets[carrier]} >"$D/${carrier}" 2>&1; } ) &`,
-    ),
+    nexttraceJob("ct", 0),
+    nexttraceJob("cu", 2),
+    nexttraceJob("cm", 4),
     "  wait",
     "elif command -v traceroute >/dev/null 2>&1; then",
     `  echo ${TOOL_MARKER_PREFIX}traceroute__`,
@@ -213,8 +218,11 @@ export function buildBackRouteCommand(region: BackRouteRegion): string {
 export interface BackRouteHop {
   /** 跳数，从 1 开始。 */
   ttl: number;
-  /** 该跳出现过的 ASN（nexttrace 给出的 + 骨干前缀兜底），去重。 */
-  asns: number[];
+  ip: string;
+  /** nexttrace 给出的 ASN（59.43.* 视为 AS4809、CTGNet 视为 AS23764），缺失时用骨干前缀兜底。 */
+  asn: number | null;
+  /** 是否位于中国大陆：nexttrace 国家字段为「中国」且省份不是港澳台。 */
+  mainland: boolean;
 }
 
 export interface ParsedBackRouteOutput {
@@ -230,28 +238,28 @@ function parseAsn(value: string | undefined): number | null {
   return Number.isSafeInteger(asn) && asn > 0 ? asn : null;
 }
 
-function addHop(hops: Map<number, Set<number>>, ttl: number, asns: (number | null)[]) {
-  let set = hops.get(ttl);
-  if (!set) {
-    set = new Set();
-    hops.set(ttl, set);
-  }
-  for (const asn of asns) if (asn != null) set.add(asn);
+const NON_MAINLAND_PROVINCES = new Set(["香港", "澳门", "台湾"]);
+
+function isMainlandGeo(country: string, province: string): boolean {
+  const value = country.trim();
+  if (!value.includes("中国") && !/^china$/i.test(value)) return false;
+  return !NON_MAINLAND_PROVINCES.has(province.trim());
 }
 
 const TRACEROUTE_HOP_PATTERN = /^\s*(\d+)\s+((?:\d{1,3}\.){3}\d{1,3})\b/;
 
-/** 解析 nexttrace `--raw`（`ttl|ip|host|rtt|asn|...`）或 traceroute `-n` 的输出。 */
+/**
+ * 解析 nexttrace `--raw`（`ttl|ip|host|rtt|asn|国家|省|市|区|owner|lat|lng`）或
+ * traceroute `-n` 的输出。同一跳多次探测时取第一条有地址的记录。
+ */
 export function parseBackRouteOutput(output: string): ParsedBackRouteOutput {
   const result: ParsedBackRouteOutput = { tool: null, carriers: {} };
   let current: BackRouteCarrier | null = null;
-  let hops = new Map<number, Set<number>>();
+  let hops = new Map<number, BackRouteHop>();
 
   const flush = () => {
     if (!current) return;
-    result.carriers[current] = [...hops.entries()]
-      .sort(([left], [right]) => left - right)
-      .map(([ttl, asns]) => ({ ttl, asns: [...asns] }));
+    result.carriers[current] = [...hops.values()].sort((left, right) => left.ttl - right.ttl);
   };
 
   for (const rawLine of output.split(/\r?\n/)) {
@@ -276,13 +284,24 @@ export function parseBackRouteOutput(output: string): ParsedBackRouteOutput {
       const fields = line.split("|");
       const ttl = Number(fields[0]);
       const ip = fields[1]?.trim() ?? "";
-      if (!Number.isInteger(ttl) || ttl <= 0 || !ip || ip === "*") continue;
-      addHop(hops, ttl, [parseAsn(fields[4]), resolveBackboneAsn(ip)]);
+      if (!Number.isInteger(ttl) || ttl <= 0 || !ip || ip === "*" || hops.has(ttl)) continue;
+      let asn = parseAsn(fields[4]);
+      if (ip.startsWith("59.43.")) asn = 4809;
+      if (/CTGNet/i.test(fields[9] ?? "")) asn = 23764;
+      hops.set(ttl, {
+        ttl,
+        ip,
+        asn: asn ?? resolveBackboneAsn(ip),
+        mainland: isMainlandGeo(fields[5] ?? "", fields[6] ?? ""),
+      });
       continue;
     }
     const matched = TRACEROUTE_HOP_PATTERN.exec(line);
     if (matched) {
-      addHop(hops, Number(matched[1]), [resolveBackboneAsn(matched[2]!)]);
+      const ttl = Number(matched[1]);
+      if (hops.has(ttl)) continue;
+      const ip = matched[2]!;
+      hops.set(ttl, { ttl, ip, asn: resolveBackboneAsn(ip), mainland: false });
     }
   }
   flush();
@@ -290,7 +309,7 @@ export function parseBackRouteOutput(output: string): ParsedBackRouteOutput {
 }
 
 // ---------------------------------------------------------------------------
-// 线路判定（移植自 Transit / backtrace，code 与上游一致）
+// 线路判定（NodeQuality / NetQuality `nexttrace_test` 口径）
 // ---------------------------------------------------------------------------
 
 interface RouteCodeInfo {
@@ -300,101 +319,123 @@ interface RouteCodeInfo {
 }
 
 const ROUTE_CODE_INFO: Readonly<Record<string, RouteCodeInfo>> = {
+  // 当前口径，与 NodeQuality 输出同名。
+  CN2GIA: { short: "CN2GIA", grade: "premium" },
+  CN2GT: { short: "CN2GT", grade: "good" },
+  CN2: { short: "CN2", grade: "good" },
+  CTGGIA: { short: "CTGGIA", grade: "premium" },
+  "163": { short: "163", grade: "normal" },
+  "9929": { short: "9929", grade: "premium" },
+  "10099": { short: "10099", grade: "good" },
+  "4837": { short: "4837", grade: "normal" },
+  CMIN2: { short: "CMIN2", grade: "premium" },
+  CMI: { short: "CMI", grade: "normal" },
+  CERNET: { short: "CERNET", grade: "normal" },
+  CSTNET: { short: "CSTNET", grade: "normal" },
+  Hidden: { short: "隐藏", grade: null },
+  NoData: { short: "无数据", grade: null },
+  // v1.3.7 / v1.3.8 保存的旧 code，读取时继续兼容。
   ct_cn2_gia: { short: "CN2GIA", grade: "premium" },
   ct_cn2_gt: { short: "CN2GT", grade: "good" },
-  ct_cn2_mixed: { short: "CN2混合", grade: "good" },
-  ct_ctgnet: { short: "CTGNET", grade: "premium" },
+  ct_cn2_mixed: { short: "CN2", grade: "good" },
+  ct_ctgnet: { short: "CTGGIA", grade: "premium" },
   ct_163: { short: "163", grade: "normal" },
-  ct_destination_only: { short: "163?", grade: null },
-  ct_unknown: { short: "未知", grade: null },
+  ct_destination_only: { short: "163", grade: "normal" },
+  ct_unknown: { short: "无数据", grade: null },
   cu_9929: { short: "9929", grade: "premium" },
-  cu_9929_mixed: { short: "9929混合", grade: "good" },
-  cu_cug: { short: "CUG", grade: "good" },
+  cu_9929_mixed: { short: "9929", grade: "premium" },
+  cu_cug: { short: "10099", grade: "good" },
   cu_4837: { short: "4837", grade: "normal" },
-  cu_destination_only: { short: "4837?", grade: null },
-  cu_unknown: { short: "未知", grade: null },
+  cu_destination_only: { short: "4837", grade: "normal" },
+  cu_unknown: { short: "无数据", grade: null },
   cm_cmin2: { short: "CMIN2", grade: "premium" },
-  cm_cmin2_mixed: { short: "CMIN2混合", grade: "good" },
+  cm_cmin2_mixed: { short: "CMIN2", grade: "premium" },
   cm_cmi: { short: "CMI", grade: "normal" },
-  cm_cmnet: { short: "CMNET", grade: "normal" },
-  cm_unknown: { short: "未知", grade: null },
+  cm_cmnet: { short: "CMI", grade: "normal" },
+  cm_unknown: { short: "无数据", grade: null },
 };
 
 export function isKnownRouteCode(code: string): boolean {
   return Object.prototype.hasOwnProperty.call(ROUTE_CODE_INFO, code);
 }
 
-/** 返回 `[首次出现的位置, 出现的跳数]`，未出现为 `[-1, 0]`。 */
-function asnPosition(hops: readonly BackRouteHop[], target: number): [number, number] {
-  let first = -1;
-  let count = 0;
-  hops.forEach((hop, index) => {
-    if (!hop.asns.includes(target)) return;
-    if (first < 0) first = index;
-    count += 1;
-  });
-  return [first, count];
+/**
+ * 进入中国大陆的第一跳下标：优先用 nexttrace 的地理字段；没有地理信息时
+ * （traceroute 回退）用第一个骨干 ASN 跳。找不到返回 -1。
+ */
+function findMainlandEntry(hops: readonly BackRouteHop[]): number {
+  const byGeo = hops.findIndex((hop) => hop.mainland);
+  if (byGeo >= 0) return byGeo;
+  return hops.findIndex((hop) => hop.asn != null && CHINA_BACKBONE_ASNS.has(hop.asn));
 }
 
-function classifyTelecom(hops: readonly BackRouteHop[]): string {
-  const [cn2Index, cn2Hops] = asnPosition(hops, 4809);
-  const [ct163Index, ct163Hops] = asnPosition(hops, 4134);
-  const [ctgIndex] = asnPosition(hops, 23764);
-  if (cn2Index >= 0) {
-    // 只出现一跳 CN2 不足以和 GT 区分。
-    if (cn2Hops < 2) return "ct_cn2_mixed";
-    if (ct163Index < 0 || (cn2Index < ct163Index && ct163Hops <= 1)) return "ct_cn2_gia";
-    if (cn2Index < ct163Index) return "ct_cn2_mixed";
-    return "ct_cn2_gt";
-  }
-  if (ctgIndex >= 0) return "ct_ctgnet";
-  if (ct163Index >= 0) {
-    // 单独一跳 AS4134 更可能是目的网交付跳。
-    return ct163Hops <= 1 ? "ct_destination_only" : "ct_163";
-  }
-  return "ct_unknown";
-}
-
-function classifyUnicom(hops: readonly BackRouteHop[]): string {
-  const [cu9929Index] = asnPosition(hops, 9929);
-  const [cugIndex] = asnPosition(hops, 10099);
-  const [cu4837Index, cu4837Hops] = asnPosition(hops, 4837);
-  if (cu9929Index >= 0) {
-    return cu4837Index >= 0 && cu4837Index < cu9929Index ? "cu_9929_mixed" : "cu_9929";
-  }
-  if (cugIndex >= 0) return "cu_cug";
-  if (cu4837Index >= 0) return cu4837Hops <= 1 ? "cu_destination_only" : "cu_4837";
-  return "cu_unknown";
-}
-
-function classifyMobile(hops: readonly BackRouteHop[]): string {
-  const [cmin2Index] = asnPosition(hops, 58807);
-  const [cmiIndex] = asnPosition(hops, 58453);
-  const [cmnetIndex] = asnPosition(hops, 9808);
-  if (cmin2Index >= 0) {
-    return cmiIndex >= 0 && cmiIndex < cmin2Index ? "cm_cmin2_mixed" : "cm_cmin2";
-  }
-  if (cmiIndex >= 0) return "cm_cmi";
-  if (cmnetIndex >= 0) return "cm_cmnet";
-  return "cm_unknown";
-}
-
-export function classifyBackRoute(carrier: BackRouteCarrier, hops: readonly BackRouteHop[]): string {
-  if (carrier === "ct") return classifyTelecom(hops);
-  if (carrier === "cu") return classifyUnicom(hops);
-  return classifyMobile(hops);
+/** 第一跳认不出时，按整条路由里出现过的骨干 ASN 兜底，顺序与 NodeQuality 相同。 */
+function fallbackByAllAsns(all: ReadonlySet<number>): string | null {
+  if (all.has(58807)) return "CMIN2";
+  if (all.has(9929)) return "9929";
+  if (all.has(10099)) return "10099";
+  if (all.has(4809)) return "CN2";
+  if (all.has(9808) || all.has(58453)) return "CMI";
+  if (all.has(4134)) return "163";
+  if (all.has(4837)) return "4837";
+  return null;
 }
 
 /**
- * 进入国内骨干前最后一个境外 ASN（NetQuality 同款口径）。没进入国内骨干、或之前
- * 没有任何带 ASN 的境外跳时返回 null。
+ * 按 NodeQuality 口径判定一条回程：看进入中国大陆后第一跳的 ASN。
+ * `_carrier` 保留在签名里便于调用方对照，判定本身只看 ASN。
+ */
+export function classifyBackRoute(_carrier: BackRouteCarrier, hops: readonly BackRouteHop[]): string {
+  const all = new Set(hops.map((hop) => hop.asn).filter((asn): asn is number => asn != null));
+  let entry = findMainlandEntry(hops);
+  // 进不了大陆，或大陆段只有最后一跳（目标本身），说明中间路由被隐藏。
+  if (entry < 0 || entry === hops.length - 1) return fallbackByAllAsns(all) ?? "Hidden";
+  // Softbank（AS17676）常出现在大陆边界跳上，NodeQuality 顺延一跳再看。
+  if (hops[entry]!.asn === 17676 && entry + 1 < hops.length) entry += 1;
+
+  switch (hops[entry]!.asn) {
+    case 4134:
+      return "163";
+    case 4837:
+      return entry > 0 && hops[entry - 1]!.asn === 10099 ? "10099" : "4837";
+    case 58453:
+      return "CMI";
+    case 58807:
+      return "CMIN2";
+    case 9808:
+      return all.has(58807) ? "CMIN2" : "CMI";
+    case 9929:
+      return "9929";
+    case 10099:
+      return all.has(9929) ? "9929" : "10099";
+    case 4809: {
+      if (all.has(23764)) return "CTGGIA";
+      // 163 骨干出现在 CN2 之前，说明先走 163 再进 CN2，即 CN2GT。
+      const cn2Index = hops.findIndex((hop) => hop.asn === 4809);
+      const ct163Index = hops.findIndex((hop) => hop.asn === 4134);
+      return ct163Index >= 0 && ct163Index < cn2Index ? "CN2GT" : "CN2GIA";
+    }
+    case 23764:
+      return "CTGGIA";
+    case 4538:
+      return "CERNET";
+    case 7497:
+      return "CSTNET";
+    default:
+      return fallbackByAllAsns(all) ?? "NoData";
+  }
+}
+
+/**
+ * 进入大陆前最后一个境外 ASN（NodeQuality 同款口径）。没进入大陆、或之前没有任何
+ * 带 ASN 的境外跳时返回 null。
  */
 export function findTransitAsn(hops: readonly BackRouteHop[]): number | null {
-  const cnIndex = hops.findIndex((hop) => hop.asns.some((asn) => CHINA_BACKBONE_ASNS.has(asn)));
-  if (cnIndex <= 0) return null;
-  for (let index = cnIndex - 1; index >= 0; index--) {
-    const foreign = hops[index]!.asns.find((asn) => !CHINA_BACKBONE_ASNS.has(asn));
-    if (foreign != null) return foreign;
+  const entry = findMainlandEntry(hops);
+  if (entry <= 0) return null;
+  for (let index = entry - 1; index >= 0; index--) {
+    const asn = hops[index]!.asn;
+    if (asn != null && !CHINA_BACKBONE_ASNS.has(asn)) return asn;
   }
   return null;
 }

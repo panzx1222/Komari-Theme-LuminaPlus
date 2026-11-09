@@ -12,11 +12,18 @@ import {
   type BackRouteHop,
 } from "@/utils/backRoute";
 
-const hops = (...asns: number[][]): BackRouteHop[] =>
-  asns.map((list, index) => ({ ttl: index + 1, asns: list }));
+/** 构造跳点：`[asn, 是否大陆]`，asn 为 null 表示该跳没有 ASN。 */
+const hops = (...items: [number | null, boolean?][]): BackRouteHop[] =>
+  items.map(([asn, mainland], index) => ({
+    ttl: index + 1,
+    ip: `10.0.0.${index + 1}`,
+    asn,
+    mainland: mainland === true,
+  }));
 
-function nt(ttl: number, ip: string, asn: string) {
-  return `${ttl}|${ip}|host|1.23|${asn}|日本|东京|||Org|0.0|0.0`;
+/** nexttrace `--raw` 一行：ttl|ip|host|rtt|asn|国家|省|市|区|owner|lat|lng */
+function nt(ttl: number, ip: string, asn: string, country = "", province = "", owner = "") {
+  return `${ttl}|${ip}|host|1.23|${asn}|${country}|${province}|||${owner}|0.0|0.0`;
 }
 
 const NEXTTRACE_OUTPUT = [
@@ -24,23 +31,24 @@ const NEXTTRACE_OUTPUT = [
   "__LP_ROUTE_SECTION_ct__",
   "traceroute to 1.2.3.4, 30 hops max, 52 bytes payload",
   nt(1, "10.0.0.1", ""),
-  nt(2, "103.1.1.1", "17676"),
+  nt(2, "103.1.1.1", "17676", "日本", "东京"),
   "3|*||||||",
-  nt(4, "202.97.1.1", "4134"),
-  nt(5, "202.97.2.2", "4134"),
-  nt(6, "113.96.1.1", "4134"),
+  nt(4, "202.97.1.1", "4134", "中国", "广东"),
+  nt(4, "202.97.9.9", "4134", "中国", "广东"),
+  nt(5, "113.96.1.1", "4134", "中国", "广东"),
   "__LP_ROUTE_SECTION_cu__",
   nt(1, "10.0.0.1", ""),
-  nt(2, "38.1.1.1", "979"),
-  nt(3, "218.105.1.1", "9929"),
-  nt(4, "218.105.2.1", "9929"),
+  nt(2, "38.1.1.1", "979", "美国"),
+  nt(3, "218.105.1.1", "9929", "中国", "广东"),
+  nt(4, "218.105.2.1", "9929", "中国", "广东"),
   "__LP_ROUTE_SECTION_cm__",
   nt(1, "10.0.0.1", ""),
-  nt(2, "223.119.8.1", ""),
-  nt(3, "221.183.1.1", "9808"),
+  nt(2, "223.119.8.1", "58807", "中国", "香港"),
+  nt(3, "221.183.1.1", "9808", "中国", "广东"),
+  nt(4, "120.1.1.1", "56040", "中国", "广东"),
 ].join("\n");
 
-describe("backRoute classification", () => {
+describe("backRoute classification (NodeQuality rules)", () => {
   it("resolves backbone ASNs from IPv4 prefixes", () => {
     expect(resolveBackboneAsn("59.43.1.1")).toBe(4809);
     expect(resolveBackboneAsn("223.119.8.1")).toBe(58807);
@@ -49,19 +57,40 @@ describe("backRoute classification", () => {
     expect(resolveBackboneAsn("111.240.1.1")).toBeNull();
   });
 
-  it("follows the conservative Transit/backtrace rules", () => {
-    expect(classifyBackRoute("ct", hops([4809], [4809], [4134]))).toBe("ct_cn2_gia");
-    expect(classifyBackRoute("ct", hops([4809], [4134]))).toBe("ct_cn2_mixed");
-    expect(classifyBackRoute("ct", hops([4134], [4809], [4809]))).toBe("ct_cn2_gt");
-    expect(classifyBackRoute("ct", hops([4134]))).toBe("ct_destination_only");
-    expect(classifyBackRoute("cu", hops([4837], [9929]))).toBe("cu_9929_mixed");
-    expect(classifyBackRoute("cm", hops([58807], [9808]))).toBe("cm_cmin2");
-    expect(classifyBackRoute("cm", hops([58453], [58453]))).toBe("cm_cmi");
+  it("names the line after the first mainland hop", () => {
+    expect(classifyBackRoute("ct", hops([3356], [4134, true], [4134, true]))).toBe("163");
+    // 只有一跳 AS4134 也按 NodeQuality 判 163，不再显示「163?」。
+    expect(classifyBackRoute("ct", hops([2914], [4134, true], [4812, true]))).toBe("163");
+    expect(classifyBackRoute("ct", hops([979], [4809, true], [4809, true]))).toBe("CN2GIA");
+    expect(classifyBackRoute("ct", hops([4134], [4809, true], [4809, true]))).toBe("CN2GT");
+    expect(classifyBackRoute("cu", hops([2497], [4837, true], [4837, true]))).toBe("4837");
+    expect(classifyBackRoute("cu", hops([10099], [4837, true], [17816, true]))).toBe("10099");
+    expect(classifyBackRoute("cm", hops([3356], [58453, true], [9808, true]))).toBe("CMI");
+    expect(classifyBackRoute("cm", hops([58807], [9808, true], [56040, true]))).toBe("CMIN2");
   });
 
-  it("finds the last foreign ASN before the China backbone", () => {
-    expect(findTransitAsn(hops([], [2497], [], [4837], [4837]))).toBe(2497);
-    expect(findTransitAsn(hops([4134], [4134]))).toBeNull();
+  it("skips Softbank on the border hop", () => {
+    expect(classifyBackRoute("ct", hops([2914], [17676, true], [4134, true], [4134, true]))).toBe("163");
+  });
+
+  it("falls back to any backbone ASN when the first mainland hop is provincial", () => {
+    expect(classifyBackRoute("ct", hops([2914], [4812, true], [4134, true], [4812, true]))).toBe("163");
+    expect(classifyBackRoute("cm", hops([3356], [56040, true], [58453, true], [56040, true]))).toBe("CMI");
+    expect(classifyBackRoute("ct", hops([2914], [4812, true], [4812, true]))).toBe("NoData");
+  });
+
+  it("reports hidden routes when nothing inside the mainland is visible", () => {
+    expect(classifyBackRoute("ct", hops([2914], [null], [4812, true]))).toBe("Hidden");
+    expect(classifyBackRoute("ct", hops([2914], [null]))).toBe("Hidden");
+  });
+
+  it("uses backbone ASNs as the mainland entry when there is no geo data", () => {
+    expect(classifyBackRoute("ct", hops([null], [4809], [4809], [4134]))).toBe("CN2GIA");
+  });
+
+  it("finds the last foreign ASN before the mainland", () => {
+    expect(findTransitAsn(hops([null], [2497], [null], [4837, true], [4837, true]))).toBe(2497);
+    expect(findTransitAsn(hops([4134, true], [4134, true]))).toBeNull();
     expect(findTransitAsn(hops([3356]))).toBeNull();
   });
 });
@@ -70,20 +99,42 @@ describe("backRoute output parsing", () => {
   it("parses nexttrace raw sections and builds a result", () => {
     const parsed = parseBackRouteOutput(NEXTTRACE_OUTPUT);
     expect(parsed.tool).toBe("nexttrace");
-    expect(parsed.carriers.ct?.map((hop) => hop.ttl)).toEqual([1, 2, 4, 5, 6]);
+    // 同一跳的第二条记录被忽略，"*" 跳被跳过。
+    expect(parsed.carriers.ct?.map((hop) => hop.ttl)).toEqual([1, 2, 4, 5]);
+    // 香港不算中国大陆。
+    expect(parsed.carriers.cm?.map((hop) => hop.mainland)).toEqual([false, false, true, true]);
 
     const outcome = buildBackRouteResult(NEXTTRACE_OUTPUT, "gd", 1_700_000_000);
     expect(outcome.status).toBe("ok");
     if (outcome.status !== "ok") return;
-    expect(outcome.result.ct).toEqual({ code: "ct_163", transit: 17676 });
-    expect(outcome.result.cu).toEqual({ code: "cu_9929", transit: 979 });
-    expect(outcome.result.cm).toEqual({ code: "cm_cmin2", transit: null });
+    expect(outcome.result.ct).toEqual({ code: "163", transit: 17676 });
+    expect(outcome.result.cu).toEqual({ code: "9929", transit: 979 });
+    expect(outcome.result.cm).toEqual({ code: "CMIN2", transit: null });
 
     const meta = outcome.result;
     expect(formatBackRouteBadge("ct", meta.ct, meta)?.text).toBe("Softbank->163");
     // AS979 不在中转白名单里，只显示骨干。
     expect(formatBackRouteBadge("cu", meta.cu, meta)?.text).toBe("9929");
     expect(formatBackRouteBadge("cm", meta.cm, meta)?.grade).toBe("premium");
+  });
+
+  it("treats 59.43.* hops as CN2 and CTGNet owners as AS23764", () => {
+    const output = [
+      "__LP_ROUTE_TOOL_nexttrace__",
+      "__LP_ROUTE_SECTION_ct__",
+      nt(1, "10.0.0.1", ""),
+      nt(2, "69.194.1.1", "", "美国", "", "CTGNet"),
+      nt(3, "59.43.1.1", "", "中国", "广东"),
+      nt(4, "59.43.2.1", "", "中国", "广东"),
+    ].join("\n");
+    expect(parseBackRouteOutput(output).carriers.ct?.map((hop) => hop.asn)).toEqual([
+      null,
+      23764,
+      4809,
+      4809,
+    ]);
+    const outcome = buildBackRouteResult(output, "gd", 1);
+    expect(outcome.status === "ok" && outcome.result.ct?.code).toBe("CTGGIA");
   });
 
   it("parses traceroute fallback output without transit", () => {
@@ -93,6 +144,7 @@ describe("backRoute output parsing", () => {
       " 1  10.0.0.1  0.5 ms",
       " 2  59.43.1.1  10 ms",
       " 3  59.43.2.1  11 ms",
+      " 4  113.96.1.1  12 ms",
       "__LP_ROUTE_SECTION_cu__",
       "__LP_ROUTE_SECTION_cm__",
     ].join("\n");
@@ -100,8 +152,8 @@ describe("backRoute output parsing", () => {
     expect(outcome.status).toBe("ok");
     if (outcome.status !== "ok") return;
     expect(outcome.result.tool).toBe("traceroute");
-    expect(outcome.result.ct).toEqual({ code: "ct_cn2_gia", transit: null });
-    expect(outcome.result.cu?.code).toBe("cu_unknown");
+    expect(outcome.result.ct).toEqual({ code: "CN2GIA", transit: null });
+    expect(outcome.result.cu?.code).toBe("Hidden");
   });
 
   it("reports agent-side failures distinctly", () => {
@@ -120,24 +172,30 @@ describe("backRoute command", () => {
     expect(command).toContain("gd-ct-v4.ip.zstaticcdn.com");
     expect(command).toContain("gd-cm-v4.ip.zstaticcdn.com");
     expect(command).not.toContain("sh-ct");
+    // NodeQuality 同款：遇到限流提示会重试。
+    expect(command).toContain("try again later");
     // 非法地区回退到默认值，不会把任意字符串拼进命令。
     expect(buildBackRouteCommand("x; rm -rf /" as never)).toBe(buildBackRouteCommand("gd"));
   });
 });
 
 describe("backRoute settings", () => {
-  it("drops malformed entries", () => {
+  it("drops malformed entries and keeps older codes readable", () => {
     const settings = normalizeBackRouteSettings({
       region: "bj",
       results: {
-        a: { at: 1, region: "gd", tool: "nexttrace", ct: { code: "ct_163", transit: 17676 } },
+        a: { at: 1, region: "gd", tool: "nexttrace", ct: { code: "163", transit: 17676 } },
         b: { at: "bad" },
         c: { at: 2, ct: { code: "evil" } },
+        d: { at: 3, ct: { code: "ct_destination_only", transit: null } },
       },
     });
     expect(settings.region).toBe("bj");
-    expect(Object.keys(settings.results)).toEqual(["a", "c"]);
+    expect(Object.keys(settings.results)).toEqual(["a", "c", "d"]);
     expect(settings.results.c?.ct).toBeUndefined();
+    const legacy = settings.results.d!;
+    // 旧版的「163?」现在直接显示 163。
+    expect(formatBackRouteBadge("ct", legacy.ct, legacy)?.text).toBe("163");
   });
 
   it("maps ping task names to carriers", () => {

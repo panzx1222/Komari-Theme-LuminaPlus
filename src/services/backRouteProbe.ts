@@ -13,8 +13,8 @@ import {
 
 const REQUEST_TIMEOUT_MS = 15_000;
 const POLL_INTERVAL_MS = 4_000;
-/** 三网并行、每家最多 2×90s，再留一点下载 nexttrace 的余量。 */
-const PROBE_TIMEOUT_MS = 240_000;
+/** 三网并行、每家最多 5 次 ×（60s + 5s 间隔），再留一点下载 nexttrace 的余量。 */
+const PROBE_TIMEOUT_MS = 420_000;
 
 const ExecResponseSchema = z
   .object({ task_id: z.string().min(1) })
@@ -112,7 +112,7 @@ export async function waitBackRouteResults(
   taskId: string,
   uuids: string[],
   region: BackRouteRegion,
-  onResult: (uuid: string, outcome: BackRouteProbeOutcome) => void,
+  onResult: (uuid: string, outcome: BackRouteProbeOutcome, output: string) => void,
   signal?: AbortSignal,
 ): Promise<void> {
   const path = `/api/admin/task/${encodeURIComponent(taskId)}/result`;
@@ -140,14 +140,14 @@ export async function waitBackRouteResults(
       pending.delete(row.client);
       const output = row.result ?? "";
       if (output.trim() === "Client offline!") {
-        onResult(row.client, { status: "failed", detail: "节点离线" });
+        onResult(row.client, { status: "failed", detail: "节点离线" }, output);
         continue;
       }
-      onResult(row.client, buildBackRouteResult(output, region, Math.floor(Date.now() / 1000)));
+      onResult(row.client, buildBackRouteResult(output, region, Math.floor(Date.now() / 1000)), output);
     }
   }
   for (const uuid of pending) {
-    onResult(uuid, { status: "failed", detail: "等待超时，节点可能仍在执行" });
+    onResult(uuid, { status: "failed", detail: "等待超时，节点可能仍在执行" }, "");
   }
 }
 

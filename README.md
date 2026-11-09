@@ -178,7 +178,8 @@ chmod 644 /komari/data/theme/LuminaPlus/dist/assets/my-background.mp4
 - 需要节点的 Komari Agent 开启远程控制；后台账号启用 2FA 时 Komari 会拒绝远程执行。
 - 节点没有 nexttrace 时会自动下载固定版本 v1.3.7；无法下载时回退到系统 `traceroute`（只判骨干，不判中转）。
 - 三网 Ping 任务名需包含「电信 / 联通 / 移动」，徽章才能对应到行。
-- 判定规则移植自 [komari-theme-transit](https://github.com/yyy622hhh/komari-theme-transit)（MIT），其规则来自 [oneclickvirt/backtrace](https://github.com/oneclickvirt/backtrace)。
+- 判定口径与 [NodeQuality](https://github.com/LloydAsp/NodeQuality) 的三网回程路由一致（看进入中国大陆后第一跳的 ASN）；采集流程参考 [komari-theme-transit](https://github.com/yyy622hhh/komari-theme-transit)（MIT）。
+- 显示「无数据」或「隐藏」时，可在主题管理面板点行尾的文档图标查看该节点的原始输出。
 
 ### 离线状态
 
@@ -192,7 +193,7 @@ chmod 644 /komari/data/theme/LuminaPlus/dist/assets/my-background.mp4
 
 特别感谢 [stqfdyr/komari-theme-Lumina](https://github.com/stqfdyr/komari-theme-Lumina)。
 
-特别感谢 [yyy622hhh/komari-theme-transit](https://github.com/yyy622hhh/komari-theme-transit) 提供三网回程线路的判定规则（MIT License）。
+特别感谢 [yyy622hhh/komari-theme-transit](https://github.com/yyy622hhh/komari-theme-transit) 提供三网回程线路的采集思路（MIT License），以及 [LloydAsp/NodeQuality](https://github.com/LloydAsp/NodeQuality) 的三网回程判定口径。
 
 特别感谢 [Montia37/komari-theme-purcarte](https://github.com/Montia37/komari-theme-purcarte) 提供视频背景的设计思路与内置测试视频素材。
 
