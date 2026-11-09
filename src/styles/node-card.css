@@ -464,7 +464,11 @@
   justify-content: flex-end;
 }
 
-/* 三网回程线路：紧跟在线路名后的纯文字注释，沿用线路名的字号与颜色。 */
+/* 三网回程线路：放在丢包列左侧的纯文字，沿用线路名的字号与颜色，丢包值仍靠右。 */
+.multi-ping-metric-head.is-value-only:has(.multi-ping-route) {
+  justify-content: space-between;
+}
+
 .multi-ping-route {
   display: block;
   min-width: 0;
@@ -475,11 +479,6 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   cursor: default;
-}
-
-/* 有回程注释时优先保留线路名完整，空间不足时截断回程文字。 */
-.multi-ping-name-wrap:has(.multi-ping-route) .multi-ping-name {
-  flex-shrink: 0;
 }
 
 /* 主题管理「三网回程线路」面板里的结果徽章（仅后台可见）。 */
