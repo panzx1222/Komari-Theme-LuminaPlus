@@ -8,6 +8,12 @@ import { HealthBucketTooltip } from "./HealthBucketTooltip";
 import { LatencyBars } from "./LatencyBars";
 import { QualityBars } from "./QualityBars";
 import { formatHealthBucketTooltip } from "./pingBucketText";
+import {
+  carrierFromTaskName,
+  formatBackRouteBadge,
+  type BackRouteBadge,
+  type BackRouteNodeResult,
+} from "@/utils/backRoute";
 
 type MultiPingStatusDensity = "large" | "compact";
 type MultiPingMetric = "latency" | "loss";
@@ -17,11 +23,13 @@ const MultiPingMetricRow = memo(function MultiPingMetricRow({
   metric,
   density,
   redrawKey,
+  routeBadge,
 }: {
   line: HomepagePingDisplayLine;
   metric: MultiPingMetric;
   density: MultiPingStatusDensity;
   redrawKey: string;
+  routeBadge: BackRouteBadge | null;
 }) {
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const latencyColor = latencyHeatColor(line.lastValue);
@@ -95,6 +103,15 @@ const MultiPingMetricRow = memo(function MultiPingMetricRow({
             {isUnassigned && <span className="multi-ping-unassigned">未绑定</span>}
           </span>
         )}
+        {metric === "loss" && routeBadge && (
+          <span
+            className="back-route-badge"
+            data-grade={routeBadge.grade ?? "unknown"}
+            title={routeBadge.title}
+          >
+            {routeBadge.text}
+          </span>
+        )}
         <strong
           className="multi-ping-value tabular"
           style={{
@@ -131,16 +148,27 @@ const MultiPingMetricRow = memo(function MultiPingMetricRow({
   );
 });
 
+function lineRouteBadge(
+  line: HomepagePingDisplayLine,
+  backRoute: BackRouteNodeResult | undefined,
+): BackRouteBadge | null {
+  if (!backRoute) return null;
+  const carrier = carrierFromTaskName(line.taskName);
+  return carrier ? formatBackRouteBadge(carrier, backRoute[carrier], backRoute) : null;
+}
+
 const MultiPingMetricColumn = memo(function MultiPingMetricColumn({
   lines,
   metric,
   density,
   redrawKey,
+  backRoute,
 }: {
   lines: HomepagePingDisplayLine[];
   metric: MultiPingMetric;
   density: MultiPingStatusDensity;
   redrawKey: string;
+  backRoute?: BackRouteNodeResult;
 }) {
   return (
     <div
@@ -154,6 +182,7 @@ const MultiPingMetricColumn = memo(function MultiPingMetricColumn({
           metric={metric}
           density={density}
           redrawKey={redrawKey}
+          routeBadge={metric === "loss" ? lineRouteBadge(line, backRoute) : null}
         />
       ))}
     </div>
@@ -164,10 +193,13 @@ export const MultiPingStatus = memo(function MultiPingStatus({
   lines,
   density,
   className,
+  backRoute,
 }: {
   lines: HomepagePingDisplayLine[];
   density: MultiPingStatusDensity;
   className?: string;
+  /** 该节点的三网回程结果；按 Ping 任务名里的「电信/联通/移动」对应到行。 */
+  backRoute?: BackRouteNodeResult;
 }) {
   const { resolvedAppearance } = usePreferences();
   const colorsVersion = useMetricColorsVersion();
@@ -191,6 +223,7 @@ export const MultiPingStatus = memo(function MultiPingStatus({
           metric="loss"
           density={density}
           redrawKey={redrawKey}
+          backRoute={backRoute}
         />
       </div>
     </div>

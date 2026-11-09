@@ -19,6 +19,7 @@ import { Flag } from "@/components/ui/Flag";
 import { OsLogo } from "@/components/ui/OsLogo";
 import { useNodeCardModel } from "@/hooks/useNodeCardModel";
 import { useThemeSettings } from "@/hooks/useThemeSettings";
+import { useNodeBackRoute } from "@/hooks/useBackRoutes";
 import { formatBytes } from "@/utils/format";
 import { HOMEPAGE_MULTI_PING_TASK_COUNT } from "@/utils/pingTasks";
 import { speedRateColor, speedRateColorFromBytes } from "@/utils/metricTone";
@@ -672,6 +673,7 @@ export const CompactNodeCard = memo(function CompactNodeCard({
     includeMultiPing: true,
   });
   const themeSettings = useThemeSettings();
+  const backRoute = useNodeBackRoute(uuid);
 
   if (!model.node) {
     return <div className="compact-node-card animate-pulse" aria-busy />;
@@ -735,6 +737,7 @@ export const CompactNodeCard = memo(function CompactNodeCard({
         <MultiPingStatus
           lines={homepagePingLines}
           density="compact"
+          backRoute={backRoute}
           className="compact-node-bottom"
         />
       ) : (
