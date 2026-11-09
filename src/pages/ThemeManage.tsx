@@ -40,8 +40,10 @@ import {
   getAdminClients,
   getAdminPingTasks,
   getNodes,
+  getPublic,
   saveThemeSettings,
 } from "@/services/api";
+import { BACK_ROUTE_SETTINGS_KEY } from "@/utils/backRoute";
 import type { AdminClient, PingTask, ThemeSettings } from "@/types/komari";
 import {
   DEFAULT_BACKGROUND_VIDEO_URL,
@@ -1198,6 +1200,15 @@ export function ThemeManage() {
         ...draftThemeSettings,
       };
       delete nextSettings.homepagePingTask;
+      // 三网回程结果可能刚被定时检测更新，保存前取服务端最新值，避免用旧缓存覆盖。
+      try {
+        const latest = await getPublic();
+        if (latest.theme === config.theme && latest.theme_settings?.[BACK_ROUTE_SETTINGS_KEY] != null) {
+          nextSettings[BACK_ROUTE_SETTINGS_KEY] = latest.theme_settings[BACK_ROUTE_SETTINGS_KEY];
+        }
+      } catch {
+        // 取不到最新值时沿用页面缓存，不阻塞保存。
+      }
       await saveThemeSettings(config.theme, nextSettings);
       await queryClient.invalidateQueries({ queryKey: ["public"] });
       if (editVersionRef.current === submittedEditVersion) {
@@ -2338,7 +2349,7 @@ export function ThemeManage() {
         title="三网回程线路"
         description={
           <>
-            通过 Komari 远程执行在节点上运行 nexttrace，判定到所选地区电信、联通、移动的回程骨干（CN2GIA、9929、CMIN2 等），并注明在首页三网线路名后，例如「广东电信 CN2GIA」。只有 Softbank、IIJ、Level3 等常见中转商才会显示为「中转{"->"}骨干」。需要节点开启远程控制，且后台账号未启用 2FA；首次检测会自动下载 nexttrace。判定口径与 NodeQuality 的三网回程一致；显示「无数据 / 隐藏」时可点行尾的文档图标查看原始输出。
+            通过 Komari 远程执行在节点上运行 nexttrace，判定到所选地区电信、联通、移动的回程骨干（CN2GIA、9929、CMIN2 等），并显示在首页三网丢包列的左侧。只有 Softbank、IIJ、Level3 等常见中转商才会显示为「中转{"->"}骨干」。需要节点开启远程控制，且后台账号未启用 2FA；首次检测会自动下载 nexttrace。判定口径与 NodeQuality 的三网回程一致；显示「无数据 / 隐藏」时可点行尾的文档图标查看原始输出。
           </>
         }
         aside={<Radar size={16} />}

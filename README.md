@@ -173,13 +173,14 @@ chmod 644 /komari/data/theme/LuminaPlus/dist/assets/my-background.mp4
 
 ### 三网回程线路
 
-在主题管理「三网回程线路」中勾选节点并选择检测地区（广东 / 上海 / 北京），主题会通过 Komari 远程执行在节点上运行 [nexttrace](https://github.com/nxtrace/NTrace-core)，判定电信、联通、移动的回程骨干（CN2GIA、9929、CMIN2、163、4837、CMI 等），并在首页三网延迟的线路名后注明，例如「广东电信 CN2GIA」。进入国内骨干前经过 Softbank、IIJ、Level3、NTT 等常见中转商时显示为 `Softbank->163`，其余中转（如 AS979）省略。
+在主题管理「三网回程线路」中勾选节点并选择检测地区（广东 / 上海 / 北京），主题会通过 Komari 远程执行在节点上运行 [nexttrace](https://github.com/nxtrace/NTrace-core)，判定电信、联通、移动的回程骨干（CN2GIA、9929、CMIN2、163、4837、CMI 等），并显示在首页三网丢包列的左侧，例如 `CN2GIA 0.0%`。进入国内骨干前经过 Softbank、IIJ、Level3、NTT 等常见中转商时显示为 `Softbank->163`，其余中转（如 AS979）省略。
 
 - 需要节点的 Komari Agent 开启远程控制；后台账号启用 2FA 时 Komari 会拒绝远程执行。
 - 节点没有 nexttrace 时会自动下载固定版本 v1.3.7；无法下载时回退到系统 `traceroute`（只判骨干，不判中转）。
 - 三网 Ping 任务名需包含「电信 / 联通 / 移动」，徽章才能对应到行。
 - 判定口径与 [NodeQuality](https://github.com/LloydAsp/NodeQuality) 的三网回程路由一致（看进入中国大陆后第一跳的 ASN）；采集流程参考 [komari-theme-transit](https://github.com/yyy622hhh/komari-theme-transit)（MIT）。
 - 显示「无数据」或「隐藏」时，可在主题管理面板点行尾的文档图标查看该节点的原始输出。
+- 可开启「定时自动检测」，频率可选每 6 / 12 小时、每天、每 3 / 7 天，范围可选全部境外节点或仅已检测过的节点。主题没有后端，定时检测由打开着本站任意页面、已登录管理员的浏览器驱动；没有管理员页面打开时不会执行，打开后会补上。
 
 ### 离线状态
 

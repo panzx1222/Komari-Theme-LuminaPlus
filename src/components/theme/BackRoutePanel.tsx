@@ -5,29 +5,41 @@ import { FileText, Radar, Trash2 } from "lucide-react";
 import { Flag } from "@/components/ui/Flag";
 import { useBackRouteSettings } from "@/hooks/useBackRoutes";
 import {
-  dispatchBackRouteProbe,
   persistBackRouteSettings,
-  waitBackRouteResults,
+  probeAndSaveBackRoutes,
 } from "@/services/backRouteProbe";
 import type { AdminClient } from "@/types/komari";
 import {
+  BACK_ROUTE_AUTO_INTERVALS,
   BACK_ROUTE_CARRIERS,
   BACK_ROUTE_CARRIER_LABELS,
   BACK_ROUTE_REGION_LABELS,
   describeBackRouteCode,
   formatBackRouteBadge,
+  isMainlandChinaRegion as isMainlandChina,
+  nextBackRouteAutoAt,
+  type BackRouteAutoSettings,
   type BackRouteNodeResult,
   type BackRouteRegion,
+  type BackRouteSettings,
 } from "@/utils/backRoute";
 
 type RowStatus = { state: "running" | "ok" | "error"; detail?: string };
 
 const REGIONS: BackRouteRegion[] = ["gd", "sh", "bj"];
 
-/** 大陆节点到国内测速点不经过国际骨干，回程线路没有意义。 */
-function isMainlandChina(region: string) {
-  const value = region.trim().toUpperCase();
-  return value === "CN" || value === "🇨🇳";
+function formatInterval(hours: number) {
+  if (hours % 24 === 0) return hours === 24 ? "每天" : `每 ${hours / 24} 天`;
+  return `每 ${hours} 小时`;
+}
+
+function describeLastAutoRun(settings: BackRouteSettings) {
+  const last = settings.lastAutoRun;
+  if (!last) return "尚未执行";
+  const when = formatTestedAt(last.startedAt);
+  if (last.finishedAt == null) return `${when} 开始，进行中或页面中途被关闭`;
+  if (last.error) return `${when} · 失败：${last.error}`;
+  return `${when} · 成功 ${last.ok ?? 0} 台${last.failed ? `，失败 ${last.failed} 台` : ""}`;
 }
 
 function formatTestedAt(seconds: number) {
@@ -115,17 +127,10 @@ export function BackRoutePanel({
       return next;
     });
 
-    const okResults: Record<string, BackRouteNodeResult> = {};
-    let failed = 0;
     try {
-      const taskId = await dispatchBackRouteProbe(uuids, region, controller.signal);
-      await waitBackRouteResults(
-        taskId,
-        uuids,
-        region,
-        (uuid, outcome, output) => {
-          if (outcome.status === "ok") okResults[uuid] = outcome.result;
-          else failed += 1;
+      const summary = await probeAndSaveBackRoutes(theme, uuids, region, {
+        signal: controller.signal,
+        onResult: (uuid, outcome, output) => {
           if (output) setOutputs((current) => ({ ...current, [uuid]: output }));
           setStatuses((current) => ({
             ...current,
@@ -135,15 +140,11 @@ export function BackRoutePanel({
                 : { state: "error", detail: outcome.detail },
           }));
         },
-        controller.signal,
-      );
-      const okCount = Object.keys(okResults).length;
-      await persistBackRouteSettings(theme, (current) => ({
-        region,
-        results: { ...current.results, ...okResults },
-      }));
+      });
       await queryClient.invalidateQueries({ queryKey: ["public"] });
-      setMessage(`检测完成：成功 ${okCount} 台${failed ? `，失败 ${failed} 台` : ""}。`);
+      setMessage(
+        `检测完成：成功 ${summary.ok} 台${summary.failed ? `，失败 ${summary.failed} 台` : ""}。`,
+      );
       setSelected(new Set());
     } catch (runError) {
       if (controller.signal.aborted) return;
@@ -161,6 +162,32 @@ export function BackRoutePanel({
       setRunning(false);
     }
   };
+
+  // 地区和定时设置改动后立即保存：定时检测读的是服务端设置。
+  const [savingConfig, setSavingConfig] = useState(false);
+  const saveConfig = async (patch: {
+    region?: BackRouteRegion;
+    auto?: Partial<BackRouteAutoSettings>;
+  }) => {
+    if (!theme) return;
+    if (patch.region) setRegion(patch.region);
+    setSavingConfig(true);
+    setError(null);
+    try {
+      await persistBackRouteSettings(theme, (current) => ({
+        ...current,
+        ...(patch.region ? { region: patch.region } : {}),
+        auto: { ...current.auto, ...patch.auto },
+      }));
+      await queryClient.invalidateQueries({ queryKey: ["public"] });
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "保存失败");
+    } finally {
+      setSavingConfig(false);
+    }
+  };
+
+  const nextAutoAt = nextBackRouteAutoAt(settings);
 
   const clearResult = async (uuid: string) => {
     if (!theme || running) return;
@@ -187,10 +214,12 @@ export function BackRoutePanel({
               <button
                 key={value}
                 type="button"
-                disabled={running}
+                disabled={running || savingConfig}
                 data-active={region === value ? "true" : "false"}
                 aria-pressed={region === value}
-                onClick={() => setRegion(value)}
+                onClick={() => {
+                  if (value !== region) void saveConfig({ region: value });
+                }}
               >
                 {BACK_ROUTE_REGION_LABELS[value]}
               </button>
@@ -224,6 +253,60 @@ export function BackRoutePanel({
             <Radar size={14} />
             {running ? "检测中，约 1-3 分钟…" : `检测选中 ${selected.size} 台`}
           </button>
+        </div>
+      </div>
+
+      <div className="surface-inset flex flex-col gap-2 px-3 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <label className="flex cursor-pointer items-center gap-2 text-[13px] text-[var(--text-primary)]">
+            <input
+              type="checkbox"
+              checked={settings.auto.enabled}
+              disabled={!theme || savingConfig}
+              onChange={(event) => void saveConfig({ auto: { enabled: event.target.checked } })}
+            />
+            定时自动检测
+          </label>
+          <div className="flex flex-wrap items-center gap-2 text-[12px] text-[var(--text-secondary)]">
+            <span>频率</span>
+            <select
+              className="surface-inset px-2 py-1 text-[12px] outline-none disabled:cursor-not-allowed disabled:opacity-55"
+              value={settings.auto.intervalHours}
+              disabled={!theme || savingConfig}
+              onChange={(event) =>
+                void saveConfig({ auto: { intervalHours: Number(event.target.value) } })
+              }
+            >
+              {BACK_ROUTE_AUTO_INTERVALS.map((hours) => (
+                <option key={hours} value={hours}>
+                  {formatInterval(hours)}
+                </option>
+              ))}
+            </select>
+            <span>范围</span>
+            <select
+              className="surface-inset px-2 py-1 text-[12px] outline-none disabled:cursor-not-allowed disabled:opacity-55"
+              value={settings.auto.scope}
+              disabled={!theme || savingConfig}
+              onChange={(event) =>
+                void saveConfig({ auto: { scope: event.target.value === "tested" ? "tested" : "all" } })
+              }
+            >
+              <option value="all">全部境外节点</option>
+              <option value="tested">仅已检测过的节点</option>
+            </select>
+          </div>
+        </div>
+        <div className="text-[11px] leading-[1.6] text-[var(--text-tertiary)]">
+          {settings.auto.enabled ? (
+            <>
+              上次：{describeLastAutoRun(settings)}
+              {" · "}
+              下次：{nextAutoAt ? formatTestedAt(nextAutoAt) + " 之后" : "打开本站任意页面约 20 秒后"}
+              <br />
+            </>
+          ) : null}
+          主题没有后端，定时检测由「打开着本站任意页面、已登录管理员的浏览器」驱动：到期后自动检测并保存（后台标签页也可以），检测地区使用上方选择。没有管理员页面打开时不会执行，打开后会补上。
         </div>
       </div>
 

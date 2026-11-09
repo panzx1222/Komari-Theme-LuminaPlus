@@ -5,7 +5,9 @@ import {
   BACK_ROUTE_SETTINGS_KEY,
   buildBackRouteCommand,
   buildBackRouteResult,
+  isBackRouteAutoDue,
   normalizeBackRouteSettings,
+  type BackRouteNodeResult,
   type BackRouteProbeOutcome,
   type BackRouteRegion,
   type BackRouteSettings,
@@ -158,13 +160,94 @@ export async function waitBackRouteResults(
 export async function persistBackRouteSettings(
   theme: string,
   update: (current: BackRouteSettings) => BackRouteSettings,
-): Promise<BackRouteSettings> {
+): Promise<BackRouteSettings>;
+export async function persistBackRouteSettings(
+  theme: string,
+  update: (current: BackRouteSettings) => BackRouteSettings | null,
+): Promise<BackRouteSettings | null>;
+/** `update` 返回 null 时不写入，并返回 null。 */
+export async function persistBackRouteSettings(
+  theme: string,
+  update: (current: BackRouteSettings) => BackRouteSettings | null,
+): Promise<BackRouteSettings | null> {
   const latest = await getPublic();
   if (latest.theme !== theme) {
     throw new Error("站点主题已切换，请刷新页面后重试。");
   }
   const current = normalizeBackRouteSettings(latest.theme_settings?.[BACK_ROUTE_SETTINGS_KEY]);
   const next = update(current);
+  if (!next) return null;
   await saveThemeSettings(theme, { ...(latest.theme_settings ?? {}), [BACK_ROUTE_SETTINGS_KEY]: next });
   return next;
+}
+
+export interface BackRouteRunSummary {
+  ok: number;
+  failed: number;
+}
+
+/**
+ * 检测一批节点并把成功的结果合并保存。失败的节点保留旧结果，不会被覆盖。
+ * 手动检测和定时检测共用这一个入口。
+ */
+export async function probeAndSaveBackRoutes(
+  theme: string,
+  uuids: string[],
+  region: BackRouteRegion,
+  options: {
+    signal?: AbortSignal;
+    onResult?: (uuid: string, outcome: BackRouteProbeOutcome, output: string) => void;
+  } = {},
+): Promise<BackRouteRunSummary> {
+  const okResults: Record<string, BackRouteNodeResult> = {};
+  let failed = 0;
+  const taskId = await dispatchBackRouteProbe(uuids, region, options.signal);
+  await waitBackRouteResults(
+    taskId,
+    uuids,
+    region,
+    (uuid, outcome, output) => {
+      if (outcome.status === "ok") okResults[uuid] = outcome.result;
+      else failed += 1;
+      options.onResult?.(uuid, outcome, output);
+    },
+    options.signal,
+  );
+  if (Object.keys(okResults).length > 0) {
+    await persistBackRouteSettings(theme, (current) => ({
+      ...current,
+      results: { ...current.results, ...okResults },
+    }));
+  }
+  return { ok: Object.keys(okResults).length, failed };
+}
+
+/**
+ * 定时检测「占位」：重新读取服务端最新设置，确认确实到期后先写入本轮开始时间，
+ * 让其他打开着页面的管理员浏览器不会同时再跑一轮。返回 null 表示不需要检测。
+ */
+export async function claimBackRouteAutoRun(
+  theme: string,
+  nowSeconds: number,
+): Promise<BackRouteSettings | null> {
+  return persistBackRouteSettings(theme, (current) =>
+    isBackRouteAutoDue(current, nowSeconds)
+      ? { ...current, lastAutoRun: { startedAt: nowSeconds } }
+      : null,
+  );
+}
+
+/** 记录定时检测的结果。只更新本轮（startedAt 相同）的记录。 */
+export async function finishBackRouteAutoRun(
+  theme: string,
+  startedAt: number,
+  outcome: { ok: number; failed: number } | { error: string },
+): Promise<void> {
+  await persistBackRouteSettings(theme, (current) => {
+    if (current.lastAutoRun?.startedAt !== startedAt) return null;
+    return {
+      ...current,
+      lastAutoRun: { startedAt, finishedAt: Math.floor(Date.now() / 1000), ...outcome },
+    };
+  });
 }

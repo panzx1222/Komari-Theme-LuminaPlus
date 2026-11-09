@@ -10,6 +10,7 @@ import { useSiteMetadata } from "@/hooks/useSiteMetadata";
 import { useMetricColorsSync } from "@/hooks/useMetricColors";
 import { useNodeStoreStatus } from "@/hooks/useNode";
 import { PwaPullToRefresh } from "./PwaPullToRefresh";
+import { BackRouteAutoProbe } from "./BackRouteAutoProbe";
 
 export function AppShell() {
   useAppearance();
@@ -46,6 +47,7 @@ export function AppShell() {
   return (
     <div className="relative flex min-h-screen flex-col">
       <PwaPullToRefresh active={pullRefreshActive} />
+      <BackRouteAutoProbe />
       <BackgroundLayer />
       <AmbientEffectLayer />
       <main className="app-main flex-1 px-3 pb-8 sm:px-5 md:px-6 lg:px-8">

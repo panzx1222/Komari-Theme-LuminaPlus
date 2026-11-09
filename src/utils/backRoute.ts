@@ -461,9 +461,98 @@ export interface BackRouteNodeResult {
   cm?: BackRouteCarrierResult;
 }
 
+/** 定时检测的节点范围：全部境外节点，或只重测已有结果的节点。 */
+export type BackRouteAutoScope = "all" | "tested";
+
+/** 可选的定时间隔（小时）。 */
+export const BACK_ROUTE_AUTO_INTERVALS: readonly number[] = [6, 12, 24, 72, 168];
+export const DEFAULT_BACK_ROUTE_AUTO_INTERVAL = 24;
+
+export interface BackRouteAutoSettings {
+  enabled: boolean;
+  intervalHours: number;
+  scope: BackRouteAutoScope;
+}
+
+export interface BackRouteAutoRun {
+  /** 本轮开始时间（Unix 秒），同时充当多浏览器之间的「占位」。 */
+  startedAt: number;
+  /** 本轮结束时间；未结束（或中途关闭页面）时缺省。 */
+  finishedAt?: number;
+  ok?: number;
+  failed?: number;
+  /** 整轮失败时的原因，例如远程执行被拒绝。 */
+  error?: string;
+}
+
 export interface BackRouteSettings {
   region: BackRouteRegion;
   results: Record<string, BackRouteNodeResult>;
+  auto: BackRouteAutoSettings;
+  lastAutoRun?: BackRouteAutoRun;
+}
+
+export const DEFAULT_BACK_ROUTE_AUTO: BackRouteAutoSettings = {
+  enabled: false,
+  intervalHours: DEFAULT_BACK_ROUTE_AUTO_INTERVAL,
+  scope: "all",
+};
+
+/** 中国大陆节点到国内测速点不经过国际骨干，回程线路没有意义。 */
+export function isMainlandChinaRegion(region: string): boolean {
+  const value = region.trim().toUpperCase();
+  return value === "CN" || value === "🇨🇳";
+}
+
+/**
+ * 定时检测是否到期：距离上一轮开始已超过间隔。上一轮开始了但一直没结束（例如中途
+ * 关闭了页面）时，超过 15 分钟也视为可以重来。
+ */
+export function isBackRouteAutoDue(settings: BackRouteSettings, nowSeconds: number): boolean {
+  if (!settings.auto.enabled) return false;
+  const last = settings.lastAutoRun;
+  if (!last) return true;
+  if (last.finishedAt == null && nowSeconds - last.startedAt < 15 * 60) return false;
+  return nowSeconds - last.startedAt >= settings.auto.intervalHours * 3600;
+}
+
+/** 下一次定时检测的时间（Unix 秒）；未开启时返回 null。 */
+export function nextBackRouteAutoAt(settings: BackRouteSettings): number | null {
+  if (!settings.auto.enabled) return null;
+  return settings.lastAutoRun ? settings.lastAutoRun.startedAt + settings.auto.intervalHours * 3600 : null;
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function normalizeAutoSettings(value: unknown): BackRouteAutoSettings {
+  const raw = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const interval = finiteNumber(raw.intervalHours);
+  return {
+    enabled: raw.enabled === true,
+    intervalHours:
+      interval != null && BACK_ROUTE_AUTO_INTERVALS.includes(interval)
+        ? interval
+        : DEFAULT_BACK_ROUTE_AUTO_INTERVAL,
+    scope: raw.scope === "tested" ? "tested" : "all",
+  };
+}
+
+function normalizeAutoRun(value: unknown): BackRouteAutoRun | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const raw = value as Record<string, unknown>;
+  const startedAt = finiteNumber(raw.startedAt);
+  if (startedAt == null) return undefined;
+  const run: BackRouteAutoRun = { startedAt };
+  const finishedAt = finiteNumber(raw.finishedAt);
+  if (finishedAt != null) run.finishedAt = finishedAt;
+  const ok = finiteNumber(raw.ok);
+  if (ok != null) run.ok = ok;
+  const failed = finiteNumber(raw.failed);
+  if (failed != null) run.failed = failed;
+  if (typeof raw.error === "string" && raw.error) run.error = raw.error.slice(0, 200);
+  return run;
 }
 
 export const BACK_ROUTE_SETTINGS_KEY = "backRoute";
@@ -542,9 +631,12 @@ export function normalizeBackRouteSettings(value: unknown): BackRouteSettings {
     }
     results[uuid] = node;
   }
+  const lastAutoRun = normalizeAutoRun(raw.lastAutoRun);
   return {
     region: isBackRouteRegion(raw.region) ? raw.region : DEFAULT_BACK_ROUTE_REGION,
     results,
+    auto: normalizeAutoSettings(raw.auto),
+    ...(lastAutoRun ? { lastAutoRun } : {}),
   };
 }
 

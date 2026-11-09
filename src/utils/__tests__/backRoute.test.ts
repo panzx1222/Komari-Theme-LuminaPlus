@@ -6,6 +6,9 @@ import {
   classifyBackRoute,
   findTransitAsn,
   formatBackRouteBadge,
+  isBackRouteAutoDue,
+  isMainlandChinaRegion,
+  nextBackRouteAutoAt,
   normalizeBackRouteSettings,
   parseBackRouteOutput,
   resolveBackboneAsn,
@@ -203,5 +206,42 @@ describe("backRoute settings", () => {
     expect(carrierFromTaskName("广东联通")).toBe("cu");
     expect(carrierFromTaskName("广东移动")).toBe("cm");
     expect(carrierFromTaskName("Tokyo")).toBeNull();
+  });
+});
+
+describe("backRoute schedule", () => {
+  const base = normalizeBackRouteSettings({ auto: { enabled: true, intervalHours: 24 } });
+
+  it("normalizes schedule settings with safe defaults", () => {
+    expect(normalizeBackRouteSettings({}).auto).toEqual({ enabled: false, intervalHours: 24, scope: "all" });
+    const custom = normalizeBackRouteSettings({
+      auto: { enabled: true, intervalHours: 6, scope: "tested" },
+      lastAutoRun: { startedAt: 100, finishedAt: 200, ok: 3, failed: 1 },
+    });
+    expect(custom.auto).toEqual({ enabled: true, intervalHours: 6, scope: "tested" });
+    expect(custom.lastAutoRun).toEqual({ startedAt: 100, finishedAt: 200, ok: 3, failed: 1 });
+    // 不在可选列表里的间隔回退为默认值。
+    expect(normalizeBackRouteSettings({ auto: { intervalHours: 1 } }).auto.intervalHours).toBe(24);
+  });
+
+  it("is due only when enabled and the interval has passed", () => {
+    expect(isBackRouteAutoDue({ ...base, auto: { ...base.auto, enabled: false } }, 1000)).toBe(false);
+    expect(isBackRouteAutoDue(base, 1000)).toBe(true);
+    const ran = { ...base, lastAutoRun: { startedAt: 0, finishedAt: 60 } };
+    expect(isBackRouteAutoDue(ran, 23 * 3600)).toBe(false);
+    expect(isBackRouteAutoDue(ran, 24 * 3600)).toBe(true);
+    expect(nextBackRouteAutoAt(ran)).toBe(24 * 3600);
+  });
+
+  it("waits for an unfinished run before retrying", () => {
+    const unfinished = { ...base, auto: { ...base.auto, intervalHours: 6 }, lastAutoRun: { startedAt: 0 } };
+    expect(isBackRouteAutoDue(unfinished, 10 * 60)).toBe(false);
+    expect(isBackRouteAutoDue(unfinished, 6 * 3600)).toBe(true);
+  });
+
+  it("recognizes mainland China nodes", () => {
+    expect(isMainlandChinaRegion("CN")).toBe(true);
+    expect(isMainlandChinaRegion("🇨🇳")).toBe(true);
+    expect(isMainlandChinaRegion("HK")).toBe(false);
   });
 });
