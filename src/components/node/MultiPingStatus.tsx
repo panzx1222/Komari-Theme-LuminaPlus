@@ -100,16 +100,12 @@ const MultiPingMetricRow = memo(function MultiPingMetricRow({
         {metric === "latency" && (
           <span className="multi-ping-name-wrap">
             <span className="multi-ping-name">{line.taskName}</span>
+            {routeBadge && (
+              <span className="multi-ping-route" title={routeBadge.title}>
+                {routeBadge.text}
+              </span>
+            )}
             {isUnassigned && <span className="multi-ping-unassigned">未绑定</span>}
-          </span>
-        )}
-        {metric === "loss" && routeBadge && (
-          <span
-            className="back-route-badge"
-            data-grade={routeBadge.grade ?? "unknown"}
-            title={routeBadge.title}
-          >
-            {routeBadge.text}
           </span>
         )}
         <strong
@@ -182,7 +178,7 @@ const MultiPingMetricColumn = memo(function MultiPingMetricColumn({
           metric={metric}
           density={density}
           redrawKey={redrawKey}
-          routeBadge={metric === "loss" ? lineRouteBadge(line, backRoute) : null}
+          routeBadge={metric === "latency" ? lineRouteBadge(line, backRoute) : null}
         />
       ))}
     </div>
@@ -198,7 +194,7 @@ export const MultiPingStatus = memo(function MultiPingStatus({
   lines: HomepagePingDisplayLine[];
   density: MultiPingStatusDensity;
   className?: string;
-  /** 该节点的三网回程结果；按 Ping 任务名里的「电信/联通/移动」对应到行。 */
+  /** 该节点的三网回程结果；按 Ping 任务名里的「电信/联通/移动」对应到行，显示在线路名后。 */
   backRoute?: BackRouteNodeResult;
 }) {
   const { resolvedAppearance } = usePreferences();
@@ -217,13 +213,13 @@ export const MultiPingStatus = memo(function MultiPingStatus({
           metric="latency"
           density={density}
           redrawKey={redrawKey}
+          backRoute={backRoute}
         />
         <MultiPingMetricColumn
           lines={lines}
           metric="loss"
           density={density}
           redrawKey={redrawKey}
-          backRoute={backRoute}
         />
       </div>
     </div>

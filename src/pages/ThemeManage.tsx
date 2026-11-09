@@ -2338,7 +2338,7 @@ export function ThemeManage() {
         title="三网回程线路"
         description={
           <>
-            通过 Komari 远程执行在节点上运行 nexttrace，判定到所选地区电信、联通、移动的回程骨干（CN2GIA、9929、CMIN2 等），并显示在三网延迟的丢包列旁。只有 Softbank、IIJ、Level3 等常见中转商才会显示为「中转→骨干」。需要节点开启远程控制，且后台账号未启用 2FA；首次检测会自动下载 nexttrace。判定规则移植自 komari-theme-transit。
+            通过 Komari 远程执行在节点上运行 nexttrace，判定到所选地区电信、联通、移动的回程骨干（CN2GIA、9929、CMIN2 等），并注明在首页三网线路名后，例如「广东电信 CN2GIA」。只有 Softbank、IIJ、Level3 等常见中转商才会显示为「中转{"->"}骨干」。需要节点开启远程控制，且后台账号未启用 2FA；首次检测会自动下载 nexttrace。判定规则移植自 komari-theme-transit。
           </>
         }
         aside={<Radar size={16} />}

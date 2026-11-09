@@ -173,7 +173,7 @@ chmod 644 /komari/data/theme/LuminaPlus/dist/assets/my-background.mp4
 
 ### 三网回程线路
 
-在主题管理「三网回程线路」中勾选节点并选择检测地区（广东 / 上海 / 北京），主题会通过 Komari 远程执行在节点上运行 [nexttrace](https://github.com/nxtrace/NTrace-core)，判定电信、联通、移动的回程骨干（CN2GIA、9929、CMIN2、163、4837、CMI 等），并显示在首页三网延迟的丢包列旁。进入国内骨干前经过 Softbank、IIJ、Level3、NTT 等常见中转商时显示为 `Softbank→163`，其余中转（如 AS979）省略。
+在主题管理「三网回程线路」中勾选节点并选择检测地区（广东 / 上海 / 北京），主题会通过 Komari 远程执行在节点上运行 [nexttrace](https://github.com/nxtrace/NTrace-core)，判定电信、联通、移动的回程骨干（CN2GIA、9929、CMIN2、163、4837、CMI 等），并在首页三网延迟的线路名后注明，例如「广东电信 CN2GIA」。进入国内骨干前经过 Softbank、IIJ、Level3、NTT 等常见中转商时显示为 `Softbank->163`，其余中转（如 AS979）省略。
 
 - 需要节点的 Komari Agent 开启远程控制；后台账号启用 2FA 时 Komari 会拒绝远程执行。
 - 节点没有 nexttrace 时会自动下载固定版本 v1.3.7；无法下载时回退到系统 `traceroute`（只判骨干，不判中转）。

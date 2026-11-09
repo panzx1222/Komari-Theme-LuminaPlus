@@ -80,7 +80,7 @@ describe("backRoute output parsing", () => {
     expect(outcome.result.cm).toEqual({ code: "cm_cmin2", transit: null });
 
     const meta = outcome.result;
-    expect(formatBackRouteBadge("ct", meta.ct, meta)?.text).toBe("Softbank→163");
+    expect(formatBackRouteBadge("ct", meta.ct, meta)?.text).toBe("Softbank->163");
     // AS979 不在中转白名单里，只显示骨干。
     expect(formatBackRouteBadge("cu", meta.cu, meta)?.text).toBe("9929");
     expect(formatBackRouteBadge("cm", meta.cm, meta)?.grade).toBe("premium");

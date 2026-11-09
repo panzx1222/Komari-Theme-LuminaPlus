@@ -7,7 +7,7 @@
  *
  * 与 Transit 的差异：采集优先使用 nexttrace `--raw`，它逐跳给出 ASN，因此还能识别
  * 进入国内骨干前最后一个境外中转商（Softbank / IIJ / Level3 等），展示为
- * `Softbank→163`。只有中转商在白名单里才显示，例如 AS979 → CN2GIA 只显示 `CN2GIA`。
+ * `Softbank->163`。只有中转商在白名单里才显示，例如 AS979 → CN2GIA 只显示 `CN2GIA`。
  * 节点没有 nexttrace 且无法下载时回退到系统 traceroute，此时只能判骨干、不判中转。
  *
  * 浏览器拿不到逐跳信息，traceroute 只能在节点上跑：主题通过 Komari 的
@@ -35,7 +35,7 @@ export const BACK_ROUTE_REGION_LABELS: Readonly<Record<BackRouteRegion, string>>
 
 export const DEFAULT_BACK_ROUTE_REGION: BackRouteRegion = "gd";
 
-/** 境外中转商白名单：只有这些出现在国内骨干之前时才显示 `中转→骨干`。 */
+/** 境外中转商白名单：只有这些出现在国内骨干之前时才显示 `中转->骨干`。 */
 export const BACK_ROUTE_TRANSIT_NAMES: Readonly<Record<number, string>> = {
   17676: "Softbank",
   2497: "IIJ",
@@ -512,7 +512,7 @@ export function normalizeBackRouteSettings(value: unknown): BackRouteSettings {
 // ---------------------------------------------------------------------------
 
 export interface BackRouteBadge {
-  /** 例如 `CN2GIA`、`Softbank→163`。 */
+  /** 例如 `CN2GIA`、`Softbank->163`。 */
   text: string;
   grade: BackRouteGrade | null;
   /** 悬停说明。 */
@@ -529,7 +529,7 @@ export function formatBackRouteBadge(
   // 证据不足（未知 / 仅见目的网）不在卡片上硬凑线路名。
   if (!info || info.grade === null) return null;
   const transitName = entry.transit != null ? BACK_ROUTE_TRANSIT_NAMES[entry.transit] : undefined;
-  const text = transitName ? `${transitName}→${info.short}` : info.short;
+  const text = transitName ? `${transitName}->${info.short}` : info.short;
   const date = new Date(node.at * 1000);
   const dateText = Number.isFinite(date.getTime())
     ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`
@@ -548,7 +548,7 @@ export function describeBackRouteCode(entry: BackRouteCarrierResult | undefined)
   const info = ROUTE_CODE_INFO[entry.code];
   if (!info) return "—";
   const transitName = entry.transit != null ? BACK_ROUTE_TRANSIT_NAMES[entry.transit] : undefined;
-  return transitName ? `${transitName}→${info.short}` : info.short;
+  return transitName ? `${transitName}->${info.short}` : info.short;
 }
 
 /** 从 Ping 任务名推断运营商，例如「广东电信」→ ct。认不出返回 null。 */
