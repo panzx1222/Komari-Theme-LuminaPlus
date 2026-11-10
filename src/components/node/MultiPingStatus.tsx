@@ -104,7 +104,11 @@ const MultiPingMetricRow = memo(function MultiPingMetricRow({
           </span>
         )}
         {metric === "loss" && routeBadge && (
-          <span className="multi-ping-route" title={routeBadge.title}>
+          <span
+            className="multi-ping-route"
+            data-grade={routeBadge.grade ?? "normal"}
+            title={routeBadge.title}
+          >
             {routeBadge.text}
           </span>
         )}

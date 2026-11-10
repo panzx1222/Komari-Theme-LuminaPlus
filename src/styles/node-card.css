@@ -481,6 +481,27 @@
   cursor: default;
 }
 
+/* 优质 / 良好线路与后台徽章同色（premium 绿、good 蓝），但只用淡底色小标签点亮，
+   普通线路保持灰色纯文字：卡片上丢包值和分桶已经大面积是绿色，标签的底色把
+   「线路名」和旁边的数值区分开，也让整张卡只有值得注意的线路被强调。 */
+.multi-ping-route[data-grade="premium"],
+.multi-ping-route[data-grade="good"] {
+  padding: 0 4px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--route-tone) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--route-tone) 16%, transparent);
+  color: color-mix(in srgb, var(--route-tone) 82%, var(--text-primary));
+  line-height: 1.45;
+}
+
+.multi-ping-route[data-grade="premium"] {
+  --route-tone: var(--status-success, #16a34a);
+}
+
+.multi-ping-route[data-grade="good"] {
+  --route-tone: var(--accent-500, #3b82f6);
+}
+
 /* 主题管理「三网回程线路」面板里的结果徽章（仅后台可见）。 */
 .back-route-badge {
   --route-tone: var(--text-tertiary);
