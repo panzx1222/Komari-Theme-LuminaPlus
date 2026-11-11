@@ -271,17 +271,41 @@ describe("backRoute CN2 refinement", () => {
     ).toBe("CN2GIA");
   });
 
-  it("reports CN2GT when the CN2 segment hands off to the 163 backbone", () => {
+  it("reports CN2GT only when the 163 backbone carries the route to another province", () => {
+    expect(
+      codeOf(
+        trace(
+          nt(1, "10.0.0.1", ""),
+          nt(2, "59.43.1.1", "4809", "中国", "上海"),
+          nt(3, "202.97.1.1", "4134", "中国", "上海"),
+          nt(4, "202.97.2.1", "4134", "中国", "广东省"),
+        ),
+      ),
+    ).toBe("CN2GT");
+    // 同省的 202.97 只是交给省网时的交接点；「广东」与「广东省」视为同一省份。
     expect(
       codeOf(
         trace(
           nt(1, "10.0.0.1", ""),
           nt(2, "59.43.1.1", "4809", "中国", "广东"),
-          nt(3, "202.97.1.1", "4134", "中国", "广东"),
+          nt(3, "202.97.1.1", "4134", "中国", "广东省"),
           nt(4, "202.97.2.1", "4134", "中国", "广东"),
         ),
       ),
-    ).toBe("CN2GT");
+    ).toBe("CN2GIA");
+  });
+
+  it("falls back to CN2GIA when provinces are unknown", () => {
+    expect(
+      codeOf(
+        trace(
+          nt(1, "10.0.0.1", ""),
+          nt(2, "59.43.1.1", "4809", "中国"),
+          nt(3, "202.97.1.1", "4134", "中国", "北京"),
+          nt(4, "202.97.2.1", "4134", "中国", "北京"),
+        ),
+      ),
+    ).toBe("CN2GIA");
   });
 
   it("refines CN2 in the fallback path too", () => {
@@ -290,9 +314,9 @@ describe("backRoute CN2 refinement", () => {
       codeOf(
         trace(
           nt(1, "10.0.0.1", ""),
-          nt(2, "59.43.1.1", "4809", "中国", "香港"),
-          nt(3, "202.97.1.1", "4134", "中国", "香港"),
-          nt(4, "112.1.1.1", "17621", "中国", "广东"),
+          nt(2, "112.1.1.1", "17621", "中国", "上海"),
+          nt(3, "59.43.1.1", "4809", "中国", "上海"),
+          nt(4, "202.97.1.1", "4134", "中国", "广东"),
           nt(5, "112.1.2.1", "17621", "中国", "广东"),
         ),
       ),
@@ -320,7 +344,7 @@ describe("backRoute CN2 refinement", () => {
     ).toBe("CTGGIA");
   });
 
-  // 以下路由取自一份 NodeQuality 报告（洛杉矶 AS142111，三网均判 CN2GIA）。
+  // 以下路由取自两份 NodeQuality 报告（洛杉矶 AS142111 / AS979，电信均判 CN2GIA）。
   describe("Los Angeles CN2 routes via China Telecom Americas", () => {
     const section = (carrier: "ct" | "cu" | "cm", ...lines: string[]) => {
       const output = ["__LP_ROUTE_TOOL_nexttrace__", `__LP_ROUTE_SECTION_${carrier}__`, ...lines].join("\n");
@@ -345,7 +369,22 @@ describe("backRoute CN2 refinement", () => {
       ).toBe("CN2GIA");
     });
 
-    it("keeps CN2GT for China Telecom when CN2 hands off to the 163 backbone", () => {
+    it("treats a same-province 202.97 hand-off as CN2GIA", () => {
+      expect(
+        section(
+          "ct",
+          nt(1, "38.244.1.1", "979", "美国", "加利福尼亚州"),
+          nt(2, "10.14.1.1", ""),
+          nt(4, "192.48.1.1", "", "美国", "伊利诺伊州"),
+          nt(6, "59.43.1.1", "4809", "中国", "广东"),
+          nt(9, "202.97.1.1", "4134", "中国", "广东"),
+          nt(10, "113.96.1.1", "4134", "中国", "广东"),
+          nt(16, "14.22.1.1", "58466", "中国", "广东省"),
+        ),
+      ).toBe("CN2GIA");
+    });
+
+    it("keeps CN2GT for China Telecom when 163 carries the route across provinces", () => {
       expect(
         section(
           "ct",

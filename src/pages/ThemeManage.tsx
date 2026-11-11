@@ -2349,7 +2349,7 @@ export function ThemeManage() {
         title="三网回程线路"
         description={
           <>
-            通过 Komari 远程执行在节点上运行 nexttrace，判定到所选地区电信、联通、移动的回程骨干（CN2GIA、9929、CMIN2 等），并显示在首页三网丢包列的左侧。只有 Softbank、IIJ、Level3 等常见中转商才会显示为「中转{"->"}骨干」。需要节点开启远程控制，且后台账号未启用 2FA；首次检测会自动下载 nexttrace。判定口径与 NodeQuality 的三网回程一致，只有回电信时 CN2 之后转入 163 骨干会细分为 CN2GT；显示「无数据 / 隐藏」时可点行尾的文档图标查看原始输出。
+            通过 Komari 远程执行在节点上运行 nexttrace，判定到所选地区电信、联通、移动的回程骨干（CN2GIA、9929、CMIN2 等），并显示在首页三网丢包列的左侧。只有 Softbank、IIJ、Level3 等常见中转商才会显示为「中转{"->"}骨干」。需要节点开启远程控制，且后台账号未启用 2FA；首次检测会自动下载 nexttrace。判定口径与 NodeQuality 的三网回程一致，只有回电信时 CN2 落地后用 163 骨干跨省转运会细分为 CN2GT；显示「无数据 / 隐藏」时可点行尾的文档图标查看原始输出。
           </>
         }
         aside={<Radar size={16} />}

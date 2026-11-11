@@ -4,8 +4,8 @@
  * 判定口径对齐 NodeQuality 的「三网回程路由」（xykt/NetQuality `nexttrace_test`）：
  * 看回程进入中国大陆后第一跳的 ASN——AS4134 → 163、AS4809 → CN2GIA、AS4837 → 4837、
  * AS9929 → 9929、AS58807 → CMIN2、AS58453/AS9808 → CMI 等；第一跳认不出时，再按整条
- * 路由出现过的骨干 ASN 兜底。唯一不同的是回电信的 CN2：本主题会看国内段是否走 163，
- * 细分出 CN2GT（见 classifyCn2），NodeQuality 一律判 CN2GIA。境外中转取进入大陆前最后一个境外 ASN，只有在白名单里
+ * 路由出现过的骨干 ASN 兜底。唯一不同的是回电信的 CN2：CN2 落地后用 163 跨省转运时，
+ * 本主题细分为 CN2GT（见 classifyCn2），NodeQuality 一律判 CN2GIA。境外中转取进入大陆前最后一个境外 ASN，只有在白名单里
  * （Softbank / IIJ / Level3 等）才显示为 `Softbank->163`，例如 AS979 → CN2GIA 只显示
  * `CN2GIA`。
  *
@@ -224,6 +224,8 @@ export interface BackRouteHop {
   asn: number | null;
   /** 是否位于中国大陆：nexttrace 国家字段为「中国」且省份不是港澳台。 */
   mainland: boolean;
+  /** 大陆跳点所在省份（去掉「省」「市」等后缀，如「广东」）；没有地理信息时缺省。 */
+  province?: string;
 }
 
 export interface ParsedBackRouteOutput {
@@ -245,6 +247,14 @@ function isMainlandGeo(country: string, province: string): boolean {
   const value = country.trim();
   if (!value.includes("中国") && !/^china$/i.test(value)) return false;
   return !NON_MAINLAND_PROVINCES.has(province.trim());
+}
+
+/** 统一省份写法：nexttrace 有时给「广东」，有时给「广东省」。 */
+function normalizeProvince(value: string | undefined): string | undefined {
+  const province = (value ?? "")
+    .trim()
+    .replace(/(省|市|特别行政区|壮族自治区|回族自治区|维吾尔自治区|自治区)$/, "");
+  return province && province !== "*" ? province : undefined;
 }
 
 const TRACEROUTE_HOP_PATTERN = /^\s*(\d+)\s+((?:\d{1,3}\.){3}\d{1,3})\b/;
@@ -289,11 +299,14 @@ export function parseBackRouteOutput(output: string): ParsedBackRouteOutput {
       let asn = parseAsn(fields[4]);
       if (ip.startsWith("59.43.")) asn = 4809;
       if (/CTGNet/i.test(fields[9] ?? "")) asn = 23764;
+      const mainland = isMainlandGeo(fields[5] ?? "", fields[6] ?? "");
+      const province = mainland ? normalizeProvince(fields[6]) : undefined;
       hops.set(ttl, {
         ttl,
         ip,
         asn: asn ?? resolveBackboneAsn(ip),
-        mainland: isMainlandGeo(fields[5] ?? "", fields[6] ?? ""),
+        mainland,
+        ...(province ? { province } : {}),
       });
       continue;
     }
@@ -379,16 +392,22 @@ function isDomestic163(hop: BackRouteHop): boolean {
  * 把经过 CN2（AS4809）的回程细分为 CTGGIA / CN2GT / CN2GIA。
  *
  * - 出现 CTGNet（AS23764）→ CTGGIA。
- * - 只有回电信时才看国内段：CN2 之前已经走了国内 163，或者 CN2 段之后接 163 骨干
- *   （202.97.*），说明国际段走 CN2、国内段走 163 → CN2GT。
+ * - 只有回电信时才看国内段，满足任一条件 → CN2GT（国际段走 CN2、国内段走 163）：
+ *   - CN2 之前已经走了国内的 163；
+ *   - CN2 之后的 163 骨干（202.97.*）到了与 CN2 落地点不同的省份，也就是用 163 跨省转运。
  * - 其余 → CN2GIA。
  *
- * 两处刻意的取舍：
+ * 几处刻意的取舍：
  * - 境外的 AS4134 跳（例如洛杉矶的电信美洲 218.30.*）不算 163，几乎所有洛杉矶出口的
  *   CN2 回程都会经过它，算进去会把 CN2GIA 误判成 CN2GT。
+ * - CN2 落地后在同一省份经过一两跳 202.97，只是交给当地省网时经过的交接点（例如广州
+ *   59.43 → 广州 202.97 → 广东省网），仍是 CN2GIA。
+ * - 缺少省份信息（traceroute 回退、或跳点没有地理字段）时无法判断是否跨省，按 CN2GIA。
  * - 回联通、移动时，电信与它们的互联点基本都在 163 骨干上，经过 202.97 与买的是 GIA 还是
- *   GT 无关，因此不据此判 CN2GT。NodeQuality 不看 CN2 之后的 202.97，所以回电信时两边
- *   的结果可能不同：本主题按单条路由的国内段从严判定。
+ *   GT 无关，因此不据此判 CN2GT。
+ *
+ * NodeQuality 不看 CN2 之后的路由，所以只有「回电信、CN2 落地后用 163 跨省」这一种情况
+ * 两边结果不同。
  */
 function classifyCn2(
   carrier: BackRouteCarrier,
@@ -399,8 +418,16 @@ function classifyCn2(
   if (carrier !== "ct") return "CN2GIA";
   const cn2Index = hops.findIndex((hop) => hop.asn === 4809);
   if (hops.slice(0, cn2Index).some(isDomestic163)) return "CN2GT";
-  const after = hops.slice(cn2Index + 1).find((hop) => hop.asn !== 4809 && hop.asn !== 23764);
-  return after?.ip.startsWith("202.97.") ? "CN2GT" : "CN2GIA";
+  let landing: string | undefined;
+  for (let index = cn2Index; index < hops.length; index++) {
+    const hop = hops[index]!;
+    if (hop.asn === 4809) {
+      landing = hop.province ?? landing;
+    } else if (hop.ip.startsWith("202.97.") && landing && hop.province && hop.province !== landing) {
+      return "CN2GT";
+    }
+  }
+  return "CN2GIA";
 }
 
 /** 第一跳认不出时，按整条路由里出现过的骨干 ASN 兜底，顺序与 NodeQuality 相同。 */
