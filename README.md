@@ -178,7 +178,7 @@ chmod 644 /komari/data/theme/LuminaPlus/dist/assets/my-background.mp4
 - 需要节点的 Komari Agent 开启远程控制；后台账号启用 2FA 时 Komari 会拒绝远程执行。
 - 节点没有 nexttrace 时会自动下载固定版本 v1.3.7；无法下载时回退到系统 `traceroute`（只判骨干，不判中转）。
 - 三网 Ping 任务名需包含「电信 / 联通 / 移动」，徽章才能对应到行。
-- 判定口径与 [NodeQuality](https://github.com/LloydAsp/NodeQuality) 的三网回程路由一致（看进入中国大陆后第一跳的 ASN）；采集流程参考 [komari-theme-transit](https://github.com/yyy622hhh/komari-theme-transit)（MIT）。
+- 判定口径与 [NodeQuality](https://github.com/LloydAsp/NodeQuality) 的三网回程路由一致（看进入中国大陆后第一跳的 ASN）。唯一的区别是回电信的 CN2：CN2 之后转入 163 骨干（`202.97.*`）时，本主题判为 CN2GT，NodeQuality 仍判为 CN2GIA。回联通、移动时经过 163 骨干是跨网互联的必经之路，不据此判 CN2GT；采集流程参考 [komari-theme-transit](https://github.com/yyy622hhh/komari-theme-transit)（MIT）。
 - 显示「无数据」或「隐藏」时，可在主题管理面板点行尾的文档图标查看该节点的原始输出。
 - 可开启「定时自动检测」，频率可选每 6 / 12 小时、每天、每 3 / 7 天，范围可选全部境外节点或仅已检测过的节点。主题没有后端，定时检测由打开着本站任意页面、已登录管理员的浏览器驱动；没有管理员页面打开时不会执行，打开后会补上。
 

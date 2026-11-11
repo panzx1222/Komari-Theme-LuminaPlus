@@ -4,7 +4,8 @@
  * 判定口径对齐 NodeQuality 的「三网回程路由」（xykt/NetQuality `nexttrace_test`）：
  * 看回程进入中国大陆后第一跳的 ASN——AS4134 → 163、AS4809 → CN2GIA、AS4837 → 4837、
  * AS9929 → 9929、AS58807 → CMIN2、AS58453/AS9808 → CMI 等；第一跳认不出时，再按整条
- * 路由出现过的骨干 ASN 兜底。境外中转取进入大陆前最后一个境外 ASN，只有在白名单里
+ * 路由出现过的骨干 ASN 兜底。唯一不同的是回电信的 CN2：本主题会看国内段是否走 163，
+ * 细分出 CN2GT（见 classifyCn2），NodeQuality 一律判 CN2GIA。境外中转取进入大陆前最后一个境外 ASN，只有在白名单里
  * （Softbank / IIJ / Level3 等）才显示为 `Softbank->163`，例如 AS979 → CN2GIA 只显示
  * `CN2GIA`。
  *
@@ -369,31 +370,49 @@ function findMainlandEntry(hops: readonly BackRouteHop[]): number {
   return hops.findIndex((hop) => hop.asn != null && CHINA_BACKBONE_ASNS.has(hop.asn));
 }
 
+/** 国内的 163 跳：大陆境内的 AS4134，或 163 骨干的 202.97.*（traceroute 回退时没有地理信息）。 */
+function isDomestic163(hop: BackRouteHop): boolean {
+  return hop.asn === 4134 && (hop.mainland || hop.ip.startsWith("202.97."));
+}
+
 /**
- * 把经过 CN2（AS4809）的回程细分为 CTGGIA / CN2GT / CN2GIA：
- * - 出现 CTGNet（AS23764）→ CTGGIA；
- * - CN2 段结束后的下一跳是 163 骨干（202.97.*，NodeQuality 同款判据），或者 163 出现在
- *   CN2 之前 → CN2GT（国际段走 CN2、国内段走 163）；
- * - 否则 CN2 一直走到省网 → CN2GIA。
+ * 把经过 CN2（AS4809）的回程细分为 CTGGIA / CN2GT / CN2GIA。
+ *
+ * - 出现 CTGNet（AS23764）→ CTGGIA。
+ * - 只有回电信时才看国内段：CN2 之前已经走了国内 163，或者 CN2 段之后接 163 骨干
+ *   （202.97.*），说明国际段走 CN2、国内段走 163 → CN2GT。
+ * - 其余 → CN2GIA。
+ *
+ * 两处刻意的取舍：
+ * - 境外的 AS4134 跳（例如洛杉矶的电信美洲 218.30.*）不算 163，几乎所有洛杉矶出口的
+ *   CN2 回程都会经过它，算进去会把 CN2GIA 误判成 CN2GT。
+ * - 回联通、移动时，电信与它们的互联点基本都在 163 骨干上，经过 202.97 与买的是 GIA 还是
+ *   GT 无关，因此不据此判 CN2GT。NodeQuality 不看 CN2 之后的 202.97，所以回电信时两边
+ *   的结果可能不同：本主题按单条路由的国内段从严判定。
  */
-function classifyCn2(hops: readonly BackRouteHop[], all: ReadonlySet<number>): string {
+function classifyCn2(
+  carrier: BackRouteCarrier,
+  hops: readonly BackRouteHop[],
+  all: ReadonlySet<number>,
+): string {
   if (all.has(23764)) return "CTGGIA";
+  if (carrier !== "ct") return "CN2GIA";
   const cn2Index = hops.findIndex((hop) => hop.asn === 4809);
-  const ct163Index = hops.findIndex((hop) => hop.asn === 4134);
-  if (ct163Index >= 0 && ct163Index < cn2Index) return "CN2GT";
+  if (hops.slice(0, cn2Index).some(isDomestic163)) return "CN2GT";
   const after = hops.slice(cn2Index + 1).find((hop) => hop.asn !== 4809 && hop.asn !== 23764);
   return after?.ip.startsWith("202.97.") ? "CN2GT" : "CN2GIA";
 }
 
 /** 第一跳认不出时，按整条路由里出现过的骨干 ASN 兜底，顺序与 NodeQuality 相同。 */
 function fallbackByAllAsns(
+  carrier: BackRouteCarrier,
   hops: readonly BackRouteHop[],
   all: ReadonlySet<number>,
 ): string | null {
   if (all.has(58807)) return "CMIN2";
   if (all.has(9929)) return "9929";
   if (all.has(10099)) return "10099";
-  if (all.has(4809)) return classifyCn2(hops, all);
+  if (all.has(4809)) return classifyCn2(carrier, hops, all);
   if (all.has(9808) || all.has(58453)) return "CMI";
   if (all.has(4134)) return "163";
   if (all.has(4837)) return "4837";
@@ -402,13 +421,13 @@ function fallbackByAllAsns(
 
 /**
  * 按 NodeQuality 口径判定一条回程：看进入中国大陆后第一跳的 ASN。
- * `_carrier` 保留在签名里便于调用方对照，判定本身只看 ASN。
+ * `carrier` 只用于细分 CN2（见 classifyCn2），其余线路只看 ASN。
  */
-export function classifyBackRoute(_carrier: BackRouteCarrier, hops: readonly BackRouteHop[]): string {
+export function classifyBackRoute(carrier: BackRouteCarrier, hops: readonly BackRouteHop[]): string {
   const all = new Set(hops.map((hop) => hop.asn).filter((asn): asn is number => asn != null));
   let entry = findMainlandEntry(hops);
   // 进不了大陆，或大陆段只有最后一跳（目标本身），说明中间路由被隐藏。
-  if (entry < 0 || entry === hops.length - 1) return fallbackByAllAsns(hops, all) ?? "Hidden";
+  if (entry < 0 || entry === hops.length - 1) return fallbackByAllAsns(carrier, hops, all) ?? "Hidden";
   // Softbank（AS17676）常出现在大陆边界跳上，NodeQuality 顺延一跳再看。
   if (hops[entry]!.asn === 17676 && entry + 1 < hops.length) entry += 1;
 
@@ -428,7 +447,7 @@ export function classifyBackRoute(_carrier: BackRouteCarrier, hops: readonly Bac
     case 10099:
       return all.has(9929) ? "9929" : "10099";
     case 4809:
-      return classifyCn2(hops, all);
+      return classifyCn2(carrier, hops, all);
     case 23764:
       return "CTGGIA";
     case 4538:
@@ -436,7 +455,7 @@ export function classifyBackRoute(_carrier: BackRouteCarrier, hops: readonly Bac
     case 7497:
       return "CSTNET";
     default:
-      return fallbackByAllAsns(hops, all) ?? "NoData";
+      return fallbackByAllAsns(carrier, hops, all) ?? "NoData";
   }
 }
 

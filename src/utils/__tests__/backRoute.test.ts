@@ -65,7 +65,11 @@ describe("backRoute classification (NodeQuality rules)", () => {
     // 只有一跳 AS4134 也按 NodeQuality 判 163，不再显示「163?」。
     expect(classifyBackRoute("ct", hops([2914], [4134, true], [4812, true]))).toBe("163");
     expect(classifyBackRoute("ct", hops([979], [4809, true], [4809, true]))).toBe("CN2GIA");
-    expect(classifyBackRoute("ct", hops([4134], [4809, true], [4809, true]))).toBe("CN2GT");
+    // 境外的 AS4134（电信美洲）不算 163；大陆境内的 163 在 CN2 之前才判 CN2GT。
+    expect(classifyBackRoute("ct", hops([4134], [4809, true], [4809, true]))).toBe("CN2GIA");
+    expect(
+      classifyBackRoute("ct", hops([2914], [4812, true], [4134, true], [4809, true], [4812, true])),
+    ).toBe("CN2GT");
     expect(classifyBackRoute("cu", hops([2497], [4837, true], [4837, true]))).toBe("4837");
     expect(classifyBackRoute("cu", hops([10099], [4837, true], [17816, true]))).toBe("10099");
     expect(classifyBackRoute("cm", hops([3356], [58453, true], [9808, true]))).toBe("CMI");
@@ -314,5 +318,68 @@ describe("backRoute CN2 refinement", () => {
         ),
       ),
     ).toBe("CTGGIA");
+  });
+
+  // 以下路由取自一份 NodeQuality 报告（洛杉矶 AS142111，三网均判 CN2GIA）。
+  describe("Los Angeles CN2 routes via China Telecom Americas", () => {
+    const section = (carrier: "ct" | "cu" | "cm", ...lines: string[]) => {
+      const output = ["__LP_ROUTE_TOOL_nexttrace__", `__LP_ROUTE_SECTION_${carrier}__`, ...lines].join("\n");
+      const outcome = buildBackRouteResult(output, "gd", 1);
+      return outcome.status === "ok" ? outcome.result[carrier]?.code : outcome.status;
+    };
+    const losAngeles = [
+      nt(1, "38.105.1.1", "142111", "美国", "加利福尼亚"),
+      nt(2, "10.0.0.1", ""),
+      nt(4, "218.30.1.1", "4134", "美国", "加利福尼亚"),
+    ];
+
+    it("ignores the overseas AS4134 hop before CN2", () => {
+      expect(
+        section(
+          "ct",
+          ...losAngeles,
+          nt(5, "59.43.1.1", "4809", "中国", "上海"),
+          nt(9, "101.95.1.1", "4812", "中国", "上海"),
+          nt(15, "101.226.1.1", "4812", "中国", "上海"),
+        ),
+      ).toBe("CN2GIA");
+    });
+
+    it("keeps CN2GT for China Telecom when CN2 hands off to the 163 backbone", () => {
+      expect(
+        section(
+          "ct",
+          ...losAngeles,
+          nt(5, "59.43.1.1", "4809", "中国", "上海"),
+          nt(9, "202.97.1.1", "4134", "中国", "北京"),
+          nt(11, "219.141.1.1", "4847", "中国", "北京"),
+          nt(14, "106.37.1.1", "4847", "中国", "北京"),
+        ),
+      ).toBe("CN2GT");
+    });
+
+    it("does not treat 202.97 as CN2GT on the way to Unicom or Mobile", () => {
+      expect(
+        section(
+          "cu",
+          ...losAngeles,
+          nt(6, "59.43.1.1", "4809", "中国", "上海"),
+          nt(10, "202.97.1.1", "4134", "中国", "北京"),
+          nt(12, "219.158.1.1", "4837", "中国", "北京"),
+          nt(13, "123.126.1.1", "4808", "中国", "北京"),
+        ),
+      ).toBe("CN2GIA");
+      expect(
+        section(
+          "cm",
+          ...losAngeles,
+          nt(5, "59.43.1.1", "4809", "中国", "香港"),
+          nt(7, "59.43.2.1", "4809", "中国", "广东"),
+          nt(8, "202.97.1.1", "4134", "中国", "广东"),
+          nt(12, "221.183.1.1", "9808", "中国", "广东"),
+          nt(13, "120.198.1.1", "56040", "中国", "广东"),
+        ),
+      ).toBe("CN2GIA");
+    });
   });
 });
