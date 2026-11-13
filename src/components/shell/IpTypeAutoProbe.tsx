@@ -16,15 +16,18 @@ import { ipTypeFromLookup, type IpTypeNodeResult } from "@/utils/ipType";
 
 /** 首次检查延后一点，避开页面刚打开时的数据加载高峰，也错开三网回程的定时检测。 */
 const FIRST_CHECK_DELAY_MS = 30_000;
-const CHECK_INTERVAL_MS = 10 * 60_000;
+/** 没有待查节点时一轮只读一次插件状态和节点列表，开销很小。 */
+const CHECK_INTERVAL_MS = 5 * 60_000;
 /** 插件对每个调用方每分钟最多放行 6 次未命中缓存的查询，留点余量。 */
 const LOOKUP_GAP_MS = 11_000;
-/** 每攒够这么多条结果就保存一次，中途关掉页面也不会白查。 */
-const SAVE_EVERY = 5;
 /** 被插件限流（含当天额度用完）后暂停多久。 */
 const RATE_LIMIT_PAUSE_SECONDS = 3600;
 const TAB_LOCK_KEY = "luminaplus:ip-type-auto-lock";
-const TAB_LOCK_TTL_MS = 15 * 60_000;
+/**
+ * 标签页互斥锁的有效期。检测过程中每一步都会续期，所以设得很短：页面中途被刷新或
+ * 关闭、来不及释放锁时，最多一分钟后其他页面就能接着检测。
+ */
+const TAB_LOCK_TTL_MS = 60_000;
 
 function acquireTabLock(): boolean {
   try {
@@ -38,7 +41,7 @@ function acquireTabLock(): boolean {
   }
 }
 
-/** 节点多时一轮可能超过锁的有效期，每查一台续一次。 */
+/** 检测过程中持续续期。 */
 function renewTabLock() {
   try {
     window.localStorage.setItem(TAB_LOCK_KEY, String(Date.now()));
@@ -96,6 +99,12 @@ export function IpTypeAutoProbe() {
     const controller = new AbortController();
     const { signal } = controller;
 
+    // 页面关闭或刷新时主动释放锁，避免其他页面等到锁过期。
+    const releaseOnHide = () => {
+      if (runningRef.current) releaseTabLock();
+    };
+    window.addEventListener("pagehide", releaseOnHide);
+
     const check = async () => {
       if (runningRef.current) return;
       const local = readIpTypeLocalState();
@@ -126,7 +135,10 @@ export function IpTypeAutoProbe() {
         });
 
         for (const [index, node] of nodes.entries()) {
-          if (index > 0) await sleep(LOOKUP_GAP_MS, signal);
+          if (index > 0) {
+            renewTabLock();
+            await sleep(LOOKUP_GAP_MS, signal);
+          }
           renewTabLock();
           const at = Math.floor(Date.now() / 1000);
           try {
@@ -145,7 +157,11 @@ export function IpTypeAutoProbe() {
           } finally {
             writeIpTypeLocalState(local);
           }
-          if (Object.keys(pending).length >= SAVE_EVERY) await flush();
+          // 每查到一台就立即保存：页面随时可能被关闭，攒着不存会白查。
+          if (Object.keys(pending).length > 0) {
+            renewTabLock();
+            await flush();
+          }
         }
         writeIpTypeLocalState(local);
         await flush();
@@ -165,6 +181,7 @@ export function IpTypeAutoProbe() {
       controller.abort();
       window.clearTimeout(first);
       window.clearInterval(timer);
+      window.removeEventListener("pagehide", releaseOnHide);
     };
   }, [isAdmin, queryClient, theme]);
 
