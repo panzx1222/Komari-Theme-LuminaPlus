@@ -15,6 +15,7 @@ import { clsx } from "clsx";
 import { Flag } from "@/components/ui/Flag";
 import { OsLogo } from "@/components/ui/OsLogo";
 import { IpStackBadges } from "./IpStackBadges";
+import { IpTypeBadge } from "./IpTypeBadge";
 import { NodeTodayTrafficPopover } from "./NodeTodayTrafficPopover";
 import { HealthBucketTooltip } from "./HealthBucketTooltip";
 import { useNodeCardModel } from "@/hooks/useNodeCardModel";
@@ -53,6 +54,7 @@ function MiniHeader({
       <Link to={detailHref} className="mini-node-title" title={node.name}>
         {node.name}
       </Link>
+      <IpTypeBadge uuid={node.uuid} />
       {showTodayTraffic && <NodeTodayTrafficPopover uuid={node.uuid} size={13} />}
       <Link
         to={detailHref}

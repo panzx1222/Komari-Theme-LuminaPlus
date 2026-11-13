@@ -144,6 +144,47 @@
 }
 
 /* V4/V6 双栈标识药丸：仅字样（不显示真实 IP）。data-tag="green" 复用绿色标签的 token，与标签统一 */
+/* 服务器名称后方的 IP 类型（原生 / 广播，仅 IPv4）。比下方 V4/V6、标签那一行更轻：
+   更小的字号和高度、淡底色加细描边，不和名称抢视觉。原生用绿色，广播用琥珀色
+   （只是提示，不是故障，所以不用红色）。 */
+.ip-type-badge {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--ip-type-tone) 22%, transparent);
+  background: color-mix(in srgb, var(--ip-type-tone) 11%, transparent);
+  color: color-mix(in srgb, var(--ip-type-tone) 86%, var(--text-primary));
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.ip-type-badge[data-ip-type="native"] {
+  --ip-type-tone: var(--status-success, #2f9e65);
+}
+
+.ip-type-badge[data-ip-type="broadcast"] {
+  --ip-type-tone: #d9922e;
+}
+
+/* 有标签时名称不再撑满整行，让标签紧跟在名称后面；名称过长时仍由名称截断。 */
+.server-card-title-row:has(.ip-type-badge) .server-card-title-link,
+.mini-node-header:has(.ip-type-badge) .mini-node-title,
+.node-list-node-head:has(.ip-type-badge) .node-list-name {
+  flex: 0 1 auto;
+}
+
+.mini-node-header .ip-type-badge,
+.node-list-node-head .ip-type-badge {
+  margin-right: auto;
+}
+
 .ip-stack-badge {
   display: inline-flex;
   flex: 0 0 auto;

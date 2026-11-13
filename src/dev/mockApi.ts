@@ -592,7 +592,9 @@ export function installDevMockApi() {
         custom_head: "",
         custom_body: "",
         theme_settings: savedThemeSettings[theme] ?? {
-          desktopNodeViewMode: "compact",
+          // ?view=large|compact|mini|list 可切换默认视图，便于对照各视图的样式。
+          desktopNodeViewMode:
+            new URLSearchParams(window.location.search).get("view") ?? "compact",
           mobileNodeViewMode: "compact",
           showHomeOverview: true,
           showGroupTabs: true,
@@ -615,6 +617,16 @@ export function installDevMockApi() {
           homepageMultiPingNodeTaskIds: {
             ...(nodes[0] ? { [nodes[0].uuid]: [3, 2, 1] } : {}),
             ...(nodes[1] ? { [nodes[1].uuid]: [1, 4, 3] } : {}),
+          },
+          // 悉尼刻意不给结果，用来看「还没检测出结果时不显示」的状态。
+          ipType: {
+            results: {
+              "tokyo-edge-01": { type: "native", country: "JP", registered: "JP", at: 1_763_000_000 },
+              "singapore-api-01": { type: "broadcast", country: "SG", registered: "US", at: 1_763_000_000 },
+              "frankfurt-db-01": { type: "native", country: "DE", registered: "DE", at: 1_763_000_000 },
+              "new-york-worker-01": { type: "native", country: "US", registered: "US", at: 1_763_000_000 },
+              "hong-kong-cache-01": { type: "broadcast", country: "HK", registered: "GB", at: 1_763_000_000 },
+            },
           },
           backRoute: {
             region: "gd",

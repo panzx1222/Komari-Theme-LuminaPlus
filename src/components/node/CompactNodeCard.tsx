@@ -37,6 +37,7 @@ import {
   TRAFFIC_SLIVER_RATIO,
 } from "./nodeCardShared";
 import { IpStackBadges } from "./IpStackBadges";
+import { IpTypeBadge } from "./IpTypeBadge";
 import { NodeTodayTrafficPopover } from "./NodeTodayTrafficPopover";
 import { TrafficQuotaLabel } from "./TrafficQuotaLabel";
 import type { TrafficResetDisplay } from "@/utils/trafficReset";
@@ -337,6 +338,7 @@ function CompactNodeHeader({
           >
             {node.name}
           </Link>
+          <IpTypeBadge uuid={node.uuid} />
         </div>
       </div>
       <div className="compact-node-actions">

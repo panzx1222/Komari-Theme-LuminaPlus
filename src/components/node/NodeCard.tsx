@@ -42,6 +42,7 @@ import {
   TRAFFIC_SLIVER_RATIO,
 } from "./nodeCardShared";
 import { IpStackBadges } from "./IpStackBadges";
+import { IpTypeBadge } from "./IpTypeBadge";
 import { HealthBucketTooltip } from "./HealthBucketTooltip";
 import { MultiPingStatus } from "./MultiPingStatus";
 import { formatHealthBucketTooltip } from "./pingBucketText";
@@ -220,6 +221,7 @@ function NodeCardHeader({
           >
             {node.name}
           </Link>
+          <IpTypeBadge uuid={node.uuid} />
         </div>
         {(subtitle || node.ipv4 || node.ipv6) && (
           <div className="server-card-subtitle-row">

@@ -44,6 +44,7 @@ import {
   saveThemeSettings,
 } from "@/services/api";
 import { BACK_ROUTE_SETTINGS_KEY } from "@/utils/backRoute";
+import { IP_TYPE_SETTINGS_KEY } from "@/utils/ipType";
 import type { AdminClient, PingTask, ThemeSettings } from "@/types/komari";
 import {
   DEFAULT_BACKGROUND_VIDEO_URL,
@@ -1200,11 +1201,13 @@ export function ThemeManage() {
         ...draftThemeSettings,
       };
       delete nextSettings.homepagePingTask;
-      // 三网回程结果可能刚被定时检测更新，保存前取服务端最新值，避免用旧缓存覆盖。
+      // 三网回程、IP 类型的结果可能刚被后台自动检测更新，保存前取服务端最新值，避免用旧缓存覆盖。
       try {
         const latest = await getPublic();
-        if (latest.theme === config.theme && latest.theme_settings?.[BACK_ROUTE_SETTINGS_KEY] != null) {
-          nextSettings[BACK_ROUTE_SETTINGS_KEY] = latest.theme_settings[BACK_ROUTE_SETTINGS_KEY];
+        if (latest.theme === config.theme) {
+          for (const key of [BACK_ROUTE_SETTINGS_KEY, IP_TYPE_SETTINGS_KEY]) {
+            if (latest.theme_settings?.[key] != null) nextSettings[key] = latest.theme_settings[key];
+          }
         }
       } catch {
         // 取不到最新值时沿用页面缓存，不阻塞保存。

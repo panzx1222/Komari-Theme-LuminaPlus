@@ -15,6 +15,7 @@ import { HealthBucketTooltip } from "./HealthBucketTooltip";
 import { formatOsLabel, joinTagTitle, nodeDetailLinkLabels } from "./nodeCardShared";
 import { formatHealthBucketTooltip } from "./pingBucketText";
 import type { PingOverviewTaskLoadState } from "@/types/komari";
+import { IpTypeBadge } from "./IpTypeBadge";
 
 const GAUGE_SEGMENTS = 14;
 // 列表网络列的延迟柱数:比卡片(24)少,配窄列宽,柱子仍清晰可读。
@@ -293,6 +294,7 @@ const NodeRow = memo(function NodeRow({ uuid, showCosts }: { uuid: string; showC
             <span className="node-list-name" title={node.name}>
               {node.name}
             </span>
+            <IpTypeBadge uuid={uuid} />
           </div>
           {((showCosts && renewalPrice) || footerTags.length > 0) && (
             <div className="node-list-chips" title={footerTags.length > 0 ? joinTagTitle(footerTags) : undefined}>
