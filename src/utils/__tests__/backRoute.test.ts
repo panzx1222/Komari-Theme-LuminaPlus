@@ -225,7 +225,8 @@ describe("backRoute schedule", () => {
     expect(custom.auto).toEqual({ enabled: true, intervalHours: 6, scope: "tested" });
     expect(custom.lastAutoRun).toEqual({ startedAt: 100, finishedAt: 200, ok: 3, failed: 1 });
     // 不在可选列表里的间隔回退为默认值。
-    expect(normalizeBackRouteSettings({ auto: { intervalHours: 1 } }).auto.intervalHours).toBe(24);
+    expect(normalizeBackRouteSettings({ auto: { intervalHours: 5 } }).auto.intervalHours).toBe(24);
+    expect(normalizeBackRouteSettings({ auto: { intervalHours: 1 } }).auto.intervalHours).toBe(1);
   });
 
   it("is due only when enabled and the interval has passed", () => {
@@ -241,6 +242,17 @@ describe("backRoute schedule", () => {
     const unfinished = { ...base, auto: { ...base.auto, intervalHours: 6 }, lastAutoRun: { startedAt: 0 } };
     expect(isBackRouteAutoDue(unfinished, 10 * 60)).toBe(false);
     expect(isBackRouteAutoDue(unfinished, 6 * 3600)).toBe(true);
+  });
+
+  it("supports hourly runs", () => {
+    const hourly = {
+      ...base,
+      auto: { ...base.auto, intervalHours: 1 },
+      lastAutoRun: { startedAt: 0, finishedAt: 300 },
+    };
+    expect(isBackRouteAutoDue(hourly, 3599)).toBe(false);
+    expect(isBackRouteAutoDue(hourly, 3600)).toBe(true);
+    expect(nextBackRouteAutoAt(hourly)).toBe(3600);
   });
 
   it("recognizes mainland China nodes", () => {

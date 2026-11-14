@@ -525,7 +525,7 @@ export interface BackRouteNodeResult {
 export type BackRouteAutoScope = "all" | "tested";
 
 /** 可选的定时间隔（小时）。 */
-export const BACK_ROUTE_AUTO_INTERVALS: readonly number[] = [6, 12, 24, 72, 168];
+export const BACK_ROUTE_AUTO_INTERVALS: readonly number[] = [1, 2, 3, 6, 12, 24, 72, 168];
 export const DEFAULT_BACK_ROUTE_AUTO_INTERVAL = 24;
 
 export interface BackRouteAutoSettings {

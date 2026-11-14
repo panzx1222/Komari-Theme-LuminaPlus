@@ -30,7 +30,7 @@ const REGIONS: BackRouteRegion[] = ["gd", "sh", "bj"];
 
 function formatInterval(hours: number) {
   if (hours % 24 === 0) return hours === 24 ? "每天" : `每 ${hours / 24} 天`;
-  return `每 ${hours} 小时`;
+  return hours === 1 ? "每小时" : `每 ${hours} 小时`;
 }
 
 function describeLastAutoRun(settings: BackRouteSettings) {
